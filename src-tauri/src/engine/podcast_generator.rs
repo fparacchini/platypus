@@ -204,7 +204,7 @@ async fn synthesize_speech(api_key: &str, voice_id: &str, text: &str) -> Result<
 
 fn save_podcast_mp3(app_handle: &tauri::AppHandle, bytes: &[u8]) -> Result<String, String> {
     use std::fs;
-    use tauri::Manager;
+    
 
     let base = app_handle
         .path_resolver()
