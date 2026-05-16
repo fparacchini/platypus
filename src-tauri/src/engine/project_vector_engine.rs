@@ -71,11 +71,13 @@ pub async fn add_chunk_to_project_vectors(
     chunk_id: i64,
     chunk_text: &str,
     api_key: &str,
+    api_base: Option<&str>,
+    model: Option<&str>,
 ) -> Result<()> {
     let db_arc = get_project_vector_db(app_handle, project_id).await?;
     let db = db_arc.lock().await;
     
-    db.add(chunk_id, chunk_text, api_key).await?;
+    db.add(chunk_id, chunk_text, api_key, api_base, model).await?;
     
     info!("Added chunk {} to project {} vector index", chunk_id, project_id);
     Ok(())
@@ -88,11 +90,13 @@ pub async fn search_project_vectors(
     query: &str,
     top_k: usize,
     api_key: &str,
+    api_base: Option<&str>,
+    model: Option<&str>,
 ) -> Result<Vec<(i64, f32)>> {
     let db_arc = get_project_vector_db(app_handle, project_id).await?;
     let db = db_arc.lock().await;
 
-    let results = db.top_k(query, top_k, api_key).await?;
+    let results = db.top_k(query, top_k, api_key, api_base, model).await?;
 
     // Convert usize IDs to i64
     let results: Vec<(i64, f32)> = results
@@ -114,6 +118,8 @@ pub async fn search_project_vectors_live(
     query: &str,
     top_k: usize,
     api_key: &str,
+    api_base: Option<&str>,
+    model: Option<&str>,
 ) -> Result<Vec<(i64, f32)>> {
     use crate::configuration::state::ServiceAccess;
     use crate::repository::chunk_repository::get_chunk_ids_for_project;
@@ -131,7 +137,7 @@ pub async fn search_project_vectors_live(
     let db_arc = get_project_vector_db(app_handle, project_id).await?;
     let db = db_arc.lock().await;
 
-    let results = db.top_k_filtered(query, top_k, api_key, &live_ids).await?;
+    let results = db.top_k_filtered(query, top_k, api_key, &live_ids, api_base, model).await?;
 
     let results: Vec<(i64, f32)> = results
         .into_iter()

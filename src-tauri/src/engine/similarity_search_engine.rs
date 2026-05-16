@@ -141,7 +141,7 @@ const IS_TEST: bool = cfg!(test);
 
 const MAX_CHARS: usize = 7900;
 
-async fn get_embedding(text: &str, api_key: &str) -> Result<Vec<f32>> {
+async fn get_embedding(text: &str, api_key: &str, api_base: Option<&str>, model: Option<&str>) -> Result<Vec<f32>> {
     if IS_TEST {
         return Ok(vec![0.0; 512]);
     }
@@ -152,7 +152,7 @@ async fn get_embedding(text: &str, api_key: &str) -> Result<Vec<f32>> {
         text
     };
 
-    compute_vector_embedding(truncated_text, api_key)
+    compute_vector_embedding(truncated_text, api_key, api_base, model)
         .await
         .map_err(|e| anyhow!("{}", e))
 }
@@ -218,8 +218,8 @@ impl SimilaritySearch {
         Ok(())
     }
 
-    pub async fn add(&self, id: i64, text: &str, api_key: &str) -> Result<()> {
-        let vector_res = get_embedding(text, api_key).await;
+    pub async fn add(&self, id: i64, text: &str, api_key: &str, api_base: Option<&str>, model: Option<&str>) -> Result<()> {
+        let vector_res = get_embedding(text, api_key, api_base, model).await;
         let vector = match vector_res {
             Ok(v) => v,
             Err(e) => {
@@ -248,12 +248,14 @@ impl SimilaritySearch {
         query_text: &str,
         top_k: usize,
         api_key: &str,
+        api_base: Option<&str>,
+        model: Option<&str>,
     ) -> Result<Vec<(usize, f32)>> {
         info!(
             "Performing similarity search in HNSW Index: Query={}",
             query_text
         );
-        let query_vector_res = get_embedding(query_text, api_key).await;
+        let query_vector_res = get_embedding(query_text, api_key, api_base, model).await;
         let query_vector = match query_vector_res {
             Ok(v) => v,
             Err(e) => {
@@ -296,6 +298,8 @@ impl SimilaritySearch {
         top_k: usize,
         api_key: &str,
         allowed_ids: &[i64],
+        api_base: Option<&str>,
+        model: Option<&str>,
     ) -> Result<Vec<(usize, f32)>> {
         if allowed_ids.is_empty() {
             info!("No allowed IDs provided, returning empty results");
@@ -310,7 +314,7 @@ impl SimilaritySearch {
             query_text, search_k, allowed_ids.len()
         );
 
-        let all_results = self.top_k(query_text, search_k, api_key).await?;
+        let all_results = self.top_k(query_text, search_k, api_key, api_base, model).await?;
         
         // Filter to only allowed IDs
         let allowed_set: std::collections::HashSet<i64> = allowed_ids.iter().copied().collect();
@@ -341,13 +345,13 @@ mod tests {
         let db_path = temp_dir.path().join("test.db");
         let collection_name = "test_collection";
         let mut index = SimilaritySearch::open(db_path.to_str().unwrap(), collection_name)?;
-        index.add(1, "hello world", "").await?;
-        let candidates = index.top_k("hello world", 1, "").await?;
+        index.add(1, "hello world", "", None, None).await?;
+        let candidates = index.top_k("hello world", 1, "", None, None).await?;
         assert_eq!(candidates, vec![(1, 0.0)]);
         index.close().await?;
         drop(index);
         let index = SimilaritySearch::open(db_path.to_str().unwrap(), collection_name)?;
-        let candidates = index.top_k("hello world", 1, "").await?;
+        let candidates = index.top_k("hello world", 1, "", None, None).await?;
         assert_eq!(candidates, vec![(1, 0.0)]);
         Ok(())
     }
