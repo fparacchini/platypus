@@ -73,6 +73,16 @@ pub async fn send_prompt_to_gemini(
         app_handle.db(|db| get_setting(db, "api_key_gemini").expect("Failed on api_key_gemini"));
     let setting_openai =
         app_handle.db(|db| get_setting(db, "api_key_open_ai").expect("Failed on api_key_open_ai"));
+    let embed_api_base = app_handle
+        .db(|db| get_setting(db, "embed_api_base"))
+        .map(|s| s.setting_value)
+        .unwrap_or_default();
+    let embed_model = app_handle
+        .db(|db| get_setting(db, "embed_model"))
+        .map(|s| s.setting_value)
+        .unwrap_or_default();
+    let embed_api_base_opt: Option<&str> = if embed_api_base.is_empty() { None } else { Some(&embed_api_base) };
+    let embed_model_opt: Option<&str> = if embed_model.is_empty() { None } else { Some(&embed_model) };
 
     // Configure client with keep-alive and proper timeouts
     let client = Client::builder()
@@ -105,7 +115,7 @@ pub async fn send_prompt_to_gemini(
         if let Some(pid) = project_id {
             debug!("Using per-project vector search for project {}", pid);
 
-            match search_project_vectors(&app_handle, pid, &user_prompt, rag_top_k, &setting_openai.setting_value).await {
+            match search_project_vectors(&app_handle, pid, &user_prompt, rag_top_k, &setting_openai.setting_value, embed_api_base_opt, embed_model_opt).await {
                 Ok(similar_chunk_ids) if !similar_chunk_ids.is_empty() => {
                     debug!("Retrieved {} similar chunks from project index", similar_chunk_ids.len());
 

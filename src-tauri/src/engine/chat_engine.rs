@@ -77,6 +77,16 @@ pub async fn send_prompt_to_llm(
         app_handle.db(|db| get_setting(db, "api_key_claude").expect("Failed on api_key_claude"));
     let setting_openai =
         app_handle.db(|db| get_setting(db, "api_key_open_ai").expect("Failed on api_key_open_ai"));
+    let embed_api_base = app_handle
+        .db(|db| get_setting(db, "embed_api_base"))
+        .map(|s| s.setting_value)
+        .unwrap_or_default();
+    let embed_model = app_handle
+        .db(|db| get_setting(db, "embed_model"))
+        .map(|s| s.setting_value)
+        .unwrap_or_default();
+    let embed_api_base_opt: Option<&str> = if embed_api_base.is_empty() { None } else { Some(&embed_api_base) };
+    let embed_model_opt: Option<&str> = if embed_model.is_empty() { None } else { Some(&embed_model) };
     let rag_top_k: usize = app_handle
         .db(|db| get_setting(db, "rag_top_k"))
         .map(|s| s.setting_value.parse().unwrap_or(DEFAULT_RAG_TOP_K))
@@ -112,7 +122,7 @@ pub async fn send_prompt_to_llm(
         if let Some(pid) = project_id {
             debug!("Using per-project vector search for project {}", pid);
 
-            match search_project_vectors_live(&app_handle, pid, &user_prompt, rag_top_k, &setting_openai.setting_value).await {
+            match search_project_vectors_live(&app_handle, pid, &user_prompt, rag_top_k, &setting_openai.setting_value, embed_api_base_opt, embed_model_opt).await {
                 Ok(similar_chunk_ids) if !similar_chunk_ids.is_empty() => {
                     debug!("Retrieved {} similar chunks from project index", similar_chunk_ids.len());
 
