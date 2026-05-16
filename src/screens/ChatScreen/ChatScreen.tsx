@@ -980,7 +980,7 @@ export const ChatScreen: FC = () => {
         ]}
       />
       <ChatContainer>
-      {state.selectedActivityId || isLoadingActivityText ? (
+      {state.selectedActivityId ? (
   <ActivityTextContainer>
     <Box 
       width="100%"

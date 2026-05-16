@@ -1,7 +1,7 @@
 import { FC, ReactElement } from "react";
 import { UserProfileInitials } from "@platypus-app/components";
-import styled from "styled-components";
 import { useUser } from "@/state/userState";
+import styled from "styled-components";
 
 const MainContainer = styled.div`
   /* position: fixed; */
@@ -18,6 +18,7 @@ const ContentContainer = styled.div`
   justify-content: flex-end;
   align-items: center;
   padding: var(--space-s);
+  gap: var(--space-s);
 `;
 
 type ChatHeaderProps = {

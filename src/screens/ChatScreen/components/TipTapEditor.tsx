@@ -23,11 +23,6 @@ import {
   InputGroup,
   InputLeftElement,
   Spinner,
-  Tabs,
-  TabList,
-  TabPanels,
-  TabPanel,
-  Tab,
   Badge,
   Table,
   Thead,
@@ -36,7 +31,7 @@ import {
   Th,
   Td,
 } from '@chakra-ui/react';
-import { Bold, Italic, List, Undo, Redo, FolderInput, Search, Sparkles, Mic, Square, NotebookPen, Presentation, Wand2, Headphones, RefreshCcw } from "lucide-react";
+import { Bold, Italic, List, Undo, Redo, FolderInput, Search, FileText, Sparkles, Mic, Square, NotebookPen, Presentation, Wand2, Headphones, RefreshCcw } from "lucide-react";
 import { SlideGeneratorModal } from "./SlideGeneratorModal";
 import { PodcastGeneratorModal, type PodcastGenerationParams } from "./PodcastGeneratorModal";
 import { PodcastPlayerModal, type PodcastResult } from "./PodcastPlayerModal";
@@ -120,6 +115,7 @@ export const TipTapEditor: FC<TipTapEditorProps> = React.memo(({
   const [isPreparingRecording, setIsPreparingRecording] = useState(false);
   const [isProcessingRecording, setIsProcessingRecording] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
+  const [showRawTranscript, setShowRawTranscript] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
   const [recordingFilePath, setRecordingFilePath] = useState<string | null>(null);
   const [liveTranscript, setLiveTranscript] = useState("");
@@ -905,6 +901,19 @@ export const TipTapEditor: FC<TipTapEditorProps> = React.memo(({
                 />
               </Tooltip>
 
+              {/* Raw transcript toggle (moved from header) */}
+              <Tooltip label={showRawTranscript ? "Hide raw transcript" : "Show raw transcript"}>
+                <IconButton
+                  aria-label={showRawTranscript ? "Hide raw transcript" : "Show raw transcript"}
+                  icon={<FileText size={16} />}
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setShowRawTranscript((s) => !s)}
+                  color={showRawTranscript ? "var(--color-primary)" : undefined}
+                  isDisabled={isPreparingRecording || isProcessingRecording || isTranscribing || isCleaningUp || isSummarizing}
+                />
+              </Tooltip>
+
               {/* Polish note button */}
               <Tooltip label="Polish & tidy up">
                 <IconButton
@@ -1121,13 +1130,9 @@ export const TipTapEditor: FC<TipTapEditorProps> = React.memo(({
           )}
 
           {!workspaceLoading && transcriptWorkspace && (
-            <Tabs variant="enclosed" colorScheme="teal" mt={2}>
-              <TabList>
-                <Tab>Raw Transcript</Tab>
-                <Tab>Polished Summary</Tab>
-              </TabList>
-              <TabPanels>
-                <TabPanel px={0}>
+            <>
+              {showRawTranscript ? (
+                <Box mt={2}>
                   <Flex justify="space-between" align="center" mb={3}>
                     <HStack spacing={2}>
                       <Badge colorScheme="orange">Original language</Badge>
@@ -1162,9 +1167,9 @@ export const TipTapEditor: FC<TipTapEditorProps> = React.memo(({
                       </Tbody>
                     </Table>
                   </Box>
-                </TabPanel>
-
-                <TabPanel px={0}>
+                </Box>
+              ) : (
+                <Box mt={2}>
                   <Flex justify="space-between" align="center" mb={3}>
                     <HStack spacing={2}>
                       <Badge colorScheme="teal">Synthesis model: {transcriptWorkspace.synthesis_model || "unknown"}</Badge>
@@ -1193,9 +1198,9 @@ export const TipTapEditor: FC<TipTapEditorProps> = React.memo(({
                       </Text>
                     )}
                   </Box>
-                </TabPanel>
-              </TabPanels>
-            </Tabs>
+                </Box>
+              )}
+            </>
           )}
 
           {/* Model download progress */}
