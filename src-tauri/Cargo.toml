@@ -64,6 +64,11 @@ tempfile = "3.10.1"
 nnnoiseless = "0.5"
 rubato = "0.15"
 dirs = "5"
+rustfft = "6.2"
+linfa = "0.7"
+linfa-clustering = "0.7"
+ndarray = "0.15"
+ort = "2.0.0-rc.12"
 # URL ingestion: readability identifies the main article content, htmd
 # converts the cleaned HTML to markdown so headings/lists survive into chunks.
 # `default-features = false` disables readability's bundled reqwest so it
