@@ -231,6 +231,67 @@ pub fn update_activity_name(
     Ok(())
 }
 
+pub fn update_activity_diarization_json(
+    conn: &Connection,
+    activity_id: i64,
+    diarization_json: &str,
+) -> Result<(), rusqlite::Error> {
+    conn.execute(
+        "UPDATE projects_activities SET diarization_json = ?1 WHERE id = ?2",
+        params![diarization_json, activity_id],
+    )?;
+    Ok(())
+}
+
+pub fn update_activity_transcript_workspace(
+    conn: &Connection,
+    activity_id: i64,
+    transcript_raw_json: &str,
+    transcript_polished_text: &str,
+    transcript_metadata_json: &str,
+) -> Result<(), rusqlite::Error> {
+    conn.execute(
+        "UPDATE projects_activities
+         SET transcript_raw_json = ?1,
+             transcript_polished_text = ?2,
+             transcript_metadata_json = ?3
+         WHERE id = ?4",
+        params![
+            transcript_raw_json,
+            transcript_polished_text,
+            transcript_metadata_json,
+            activity_id
+        ],
+    )?;
+    Ok(())
+}
+
+pub fn get_activity_transcript_workspace(
+    conn: &Connection,
+    activity_id: i64,
+) -> Result<(String, String, String, String, String), rusqlite::Error> {
+    let mut stmt = conn.prepare(
+        "SELECT
+            COALESCE(transcript_raw_json, ''),
+            COALESCE(transcript_polished_text, ''),
+            COALESCE(transcript_metadata_json, ''),
+            COALESCE(diarization_json, ''),
+            COALESCE(full_document_text, '')
+         FROM projects_activities
+         WHERE id = ?1"
+    )?;
+
+    stmt.query_row(params![activity_id], |row| {
+        Ok((
+            row.get(0)?,
+            row.get(1)?,
+            row.get(2)?,
+            row.get(3)?,
+            row.get(4)?,
+        ))
+    })
+}
+
 pub fn add_blank_document(
     conn: &Connection,
     project_id: i64,

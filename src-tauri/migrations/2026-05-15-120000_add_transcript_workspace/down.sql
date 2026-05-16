@@ -1,0 +1,1 @@
+-- SQLite compatibility: keep columns in place on downgrade.
