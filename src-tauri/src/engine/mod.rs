@@ -15,3 +15,5 @@ pub mod meeting_popup;
 pub mod whisper_engine;
 pub mod audio_processor;
 pub mod podcast_generator;
+pub mod mel_filterbank;
+pub mod diarization_engine;
