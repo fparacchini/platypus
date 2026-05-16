@@ -19,6 +19,7 @@ import { PaperclipIcon, FileText, X } from "lucide-react";
 import { ProjectBadge } from "../../../features/ProjectBadge";
 import { ModelSelector } from "./ModelSelector";
 import { useGlobalSettings } from "../../../Providers/SettingsProvider";
+import { invoke } from "@tauri-apps/api/tauri";
 
 export type SelectedDocumentContext = {
   name: string;
@@ -50,20 +51,51 @@ export const ChatInput: FC<ChatInputProps> = ({
 }) => {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { settings } = useGlobalSettings();
-  
-  // Initialize with default model based on provider preference
-  const defaultModel = (() => {
-    switch (settings.api_choice) {
-      case "claude": return "claude-sonnet-4-6";
-      case "openai": return "gpt-5.4";
-      case "gemini": return "gemini-3-pro-preview";
-      case "local": return "llama3.3:70b";
-      default: return "claude-sonnet-4-6";
-    }
-  })();
-  
-  const [currentModel, setCurrentModel] = useState(defaultModel);
+
+  const [currentModel, setCurrentModel] = useState<string>("");
   const [currentProvider, setCurrentProvider] = useState<"claude" | "openai" | "gemini" | "local">(settings.api_choice);
+
+  // Fetch default model based on provider
+  useEffect(() => {
+    const fetchDefault = async () => {
+      const provider = settings.api_choice;
+      if (provider === "claude" || provider === "gemini") {
+        const cloudModels: Record<string, string[]> = {
+          claude: ["claude-sonnet-4-6", "claude-opus-4-6"],
+          gemini: ["gemini-3-pro-preview"],
+        };
+        const models = cloudModels[provider] || [];
+        setCurrentModel(settings.model_claude || settings.model_openai || settings.model_gemini || models[0] || "");
+        return;
+      }
+      if (provider === "openai") {
+        try {
+          const models = await invoke<string[]>("list_openai_models");
+          setCurrentModel(settings.model_openai || models[0] || "");
+          return;
+        } catch {
+          setCurrentModel(settings.model_openai || "gpt-5.4");
+          return;
+        }
+      }
+      if (provider === "local") {
+        try {
+          const models = await invoke<string[]>("list_local_models");
+          setCurrentModel(models[0] || "");
+          return;
+        } catch {
+          setCurrentModel("llama3.3:70b");
+          return;
+        }
+      }
+    };
+    fetchDefault();
+  }, [settings.api_choice, settings.model_claude, settings.model_openai, settings.model_gemini]);
+
+  // Sync provider when settings change
+  useEffect(() => {
+    setCurrentProvider(settings.api_choice);
+  }, [settings.api_choice]);
 
   const handleInput = () => {
     if (textareaRef.current) {

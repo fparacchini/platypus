@@ -12,6 +12,17 @@ use tauri::{AppHandle, Manager};
 // Default model for local Ollama
 const DEFAULT_MODEL: &str = "llama3.3:70b";
 
+// Helper to get Ollama base URL from a command's app_handle
+pub fn get_base_url_from_setting(app_handle: &tauri::AppHandle) -> Result<String, String> {
+    use crate::repository::settings_repository::get_setting;
+    let setting = app_handle.db(|db| get_setting(db, "local_model_url").map_err(|e| e.to_string()))?;
+    Ok(if setting.setting_value.is_empty() {
+        "http://localhost:11434".to_string()
+    } else {
+        setting.setting_value
+    })
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct Message {
     role: String,
@@ -244,6 +255,57 @@ async fn handle_ollama_response(
 
     debug!("Ollama response complete - output tokens: {}", output_tokens);
     Ok(())
+}
+
+#[derive(Deserialize)]
+struct OllamaModelInfo {
+    name: String,
+    model: String,
+    size: i64,
+    digest: String,
+    details: Option<OllamaModelDetails>,
+}
+
+#[derive(Deserialize)]
+struct OllamaModelsResponse {
+    models: Vec<OllamaModelInfo>,
+}
+
+#[derive(Deserialize)]
+struct OllamaModelDetails {
+    parent_model: Option<String>,
+    format: Option<String>,
+    family: Option<String>,
+    families: Option<Vec<String>>,
+    parameter_size: Option<String>,
+    quantization_level: Option<String>,
+}
+
+#[tauri::command]
+pub async fn list_local_models(app_handle: tauri::AppHandle) -> Result<Vec<String>, String> {
+    let base_url = get_base_url_from_setting(&app_handle)?;
+
+    let client = Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .map_err(|e| format!("Failed to create client: {}", e))?;
+
+    let resp = client
+        .get(format!("{}/api/tags", base_url))
+        .send()
+        .await
+        .map_err(|e| format!("Failed to connect to Ollama: {}. Make sure Ollama is running.", e))?;
+
+    if !resp.status().is_success() {
+        return Err("Failed to list models from Ollama".to_string());
+    }
+
+    let body: OllamaModelsResponse = resp
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse Ollama response: {}", e))?;
+
+    Ok(body.models.into_iter().map(|m| m.name).collect())
 }
 
 #[tauri::command]

@@ -32,7 +32,16 @@
       "Bash(gh auth:*)",
       "Bash(git remote:*)",
       "Bash(plutil:*)",
-      "Bash(xargs:*)"
+      "Bash(xargs:*)",
+      "Bash(npx tauri *)",
+      "Bash(rustup show *)",
+      "Bash(hdiutil convert *)",
+      "Bash(hdiutil detach *)",
+      "Bash(hdiutil info *)",
+      "Bash(hdiutil attach *)",
+      "Bash(cp -R \"/Volumes/Platypus_0.0.2_aarch64/Platypus.app\" /Applications/)",
+      "Bash(open *)",
+      "Bash(pkill -f \"platypus\\\\|vite\")"
     ],
     "deny": [],
     "ask": []

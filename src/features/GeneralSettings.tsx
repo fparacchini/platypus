@@ -9,8 +9,10 @@ import {
   Input,
   Button,
   useToast,
+  Spinner,
 } from "@chakra-ui/react";
 import { useGlobalSettings } from "../Providers/SettingsProvider";
+import { invoke } from "@tauri-apps/api/tauri";
 
 type LocalSettings = {
   autoStart: boolean;
@@ -34,6 +36,19 @@ type LocalSettings = {
   polishTargetLanguage: string;
   apiKeyElevenlabs: string;
 };
+
+type ModelOption = {
+  id: string;
+  name: string;
+};
+
+const CLOUD_MODELS: ModelOption[] = [
+  { id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6" },
+  { id: "claude-opus-4-6", name: "Claude Opus 4.6" },
+  { id: "gpt-5.4", name: "GPT-5.4" },
+  { id: "gemini-3-pro-preview", name: "Gemini 3 Pro" },
+];
+
 export const GeneralSettings = () => {
   const toast = useToast();
   const { settings, update } = useGlobalSettings();
@@ -60,6 +75,9 @@ export const GeneralSettings = () => {
     apiKeyElevenlabs: settings.api_key_elevenlabs,
   });
 
+  const [availableModels, setAvailableModels] = useState<ModelOption[]>([]);
+  const [modelsLoading, setModelsLoading] = useState(false);
+
   useEffect(() => {
     setLocalSettings({
       autoStart: settings.auto_start,
@@ -84,6 +102,52 @@ export const GeneralSettings = () => {
       apiKeyElevenlabs: settings.api_key_elevenlabs,
     });
   }, [settings]);
+
+  // Fetch available models based on selected endpoint
+  useEffect(() => {
+    const apiChoice = localSettings.apiChoice;
+
+    if (apiChoice === "claude" || apiChoice === "gemini") {
+      const cloud = CLOUD_MODELS.filter(
+        (m) =>
+          (apiChoice === "claude" && m.id.includes("claude")) ||
+          (apiChoice === "gemini" && m.id.includes("gemini"))
+      );
+      setAvailableModels(cloud);
+      setModelsLoading(false);
+      return;
+    }
+
+    if (apiChoice === "openai") {
+      setModelsLoading(true);
+      invoke<string[]>("list_openai_models")
+        .then((result) => {
+          setAvailableModels(result.map((id) => ({ id, name: id })));
+          setModelsLoading(false);
+        })
+        .catch(() => {
+          // Fallback to cloud models if fetch fails
+          const cloud = CLOUD_MODELS.filter((m) => m.id.includes("gpt"));
+          setAvailableModels(cloud);
+          setModelsLoading(false);
+        });
+      return;
+    }
+
+    if (apiChoice === "local") {
+      setModelsLoading(true);
+      invoke<string[]>("list_local_models")
+        .then((result) => {
+          setAvailableModels(result.map((name) => ({ id: name, name })));
+          setModelsLoading(false);
+        })
+        .catch(() => {
+          setAvailableModels([]);
+          setModelsLoading(false);
+        });
+      return;
+    }
+  }, [localSettings.apiChoice]);
 
   const savedSuccessfullyToast = () => {
     toast({
@@ -133,21 +197,6 @@ export const GeneralSettings = () => {
       localModelUrl: event.target.value,
     }));
   };
-  const onChangeModelName = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const value = event.target.value;
-    const key = (() => {
-      switch (localSettings.apiChoice) {
-        case "claude": return "modelClaude" as const;
-        case "openai": return "modelOpenai" as const;
-        case "gemini": return "modelGemini" as const;
-        default: return null;
-      }
-    })();
-    if (key) {
-      setLocalSettings((prevState) => ({ ...prevState, [key]: value }));
-    }
-  };
-
   const onSave = () => {
     update({
       ...settings,
@@ -218,6 +267,30 @@ export const GeneralSettings = () => {
       maxSpeakers: Math.max(1, Math.min(12, parsed)),
     }));
   };
+
+  const getModelValue = (): string => {
+    switch (localSettings.apiChoice) {
+      case "claude": return localSettings.modelClaude || "";
+      case "openai": return localSettings.modelOpenai || "";
+      case "gemini": return localSettings.modelGemini || "";
+      default: return "";
+    }
+  };
+
+  const setModelValue = (value: string) => {
+    switch (localSettings.apiChoice) {
+      case "claude":
+        setLocalSettings((prev) => ({ ...prev, modelClaude: value }));
+        break;
+      case "openai":
+        setLocalSettings((prev) => ({ ...prev, modelOpenai: value }));
+        break;
+      case "gemini":
+        setLocalSettings((prev) => ({ ...prev, modelGemini: value }));
+        break;
+    }
+  };
+
   return (
     <Box>
       <VStack spacing={8} align="stretch">
@@ -360,11 +433,12 @@ export const GeneralSettings = () => {
         </Box>
 
         <Box>
+          <Text fontSize="md" mb={2}>
+            AI Endpoint:
+          </Text>
           <Flex alignItems="center" mb={2}>
             <Flex flex={1}>
-              <Text fontSize="md" mr={4}>
-                API Choice:
-              </Text>
+              <Text fontSize="md">Type:</Text>
             </Flex>
             <Flex flex={2}>
               <Select
@@ -372,77 +446,155 @@ export const GeneralSettings = () => {
                 value={localSettings.apiChoice}
                 onChange={handleApiChoiceChange}
               >
-                <option value="claude">Claude</option>
-                <option value="openai">OpenAI</option>
-                <option value="gemini">Gemini</option>
+                <option value="claude">Claude (Anthropic)</option>
+                <option value="openai">OpenAI / Compatible</option>
+                <option value="gemini">Gemini (Google)</option>
                 <option value="local">Local (Ollama)</option>
               </Select>
             </Flex>
           </Flex>
-<Flex alignItems="center" mb={2}>
-              <Flex flex={1}>
-                <Text fontSize="md" mr={4}>
-                  OpenAI API Key:
-                </Text>
-              </Flex>
-              <Flex flex={2}>
-                <Input
-                  value={localSettings.apiKeyOpenAi}
-                  onChange={onChangeOpenAiApiKey}
-                  placeholder="sk-..."
-                />
-              </Flex>
-            </Flex>
-            {localSettings.apiChoice === "openai" && (
+
+          {/* Endpoint-specific config */}
+          {localSettings.apiChoice === "claude" && (
             <Flex alignItems="center" mb={2}>
               <Flex flex={1}>
-                <Text fontSize="md" mr={4}>
-                  OpenAI Base URL:
-                </Text>
+                <Text fontSize="md">API Key:</Text>
               </Flex>
               <Flex flex={2}>
                 <Input
-                  value={localSettings.openAiApiBase}
-                  onChange={e => setLocalSettings(prev => ({ ...prev, openAiApiBase: e.target.value }))}
-                  placeholder="https://api.openai.com/v1"
+                  value={localSettings.apiKeyClaude}
+                  onChange={onChangeClaueApiKey}
+                  placeholder="sk-ant-..."
                 />
               </Flex>
             </Flex>
-            )}
+          )}
+
+          {localSettings.apiChoice === "openai" && (
+            <>
+              <Flex alignItems="center" mb={2}>
+                <Flex flex={1}>
+                  <Text fontSize="md">API Key:</Text>
+                </Flex>
+                <Flex flex={2}>
+                  <Input
+                    value={localSettings.apiKeyOpenAi}
+                    onChange={onChangeOpenAiApiKey}
+                    placeholder="sk-..."
+                  />
+                </Flex>
+              </Flex>
+              <Flex alignItems="center" mb={2}>
+                <Flex flex={1}>
+                  <Text fontSize="md">Base URL:</Text>
+                </Flex>
+                <Flex flex={2}>
+                  <Input
+                    value={localSettings.openAiApiBase}
+                    onChange={(e) =>
+                      setLocalSettings((prev) => ({ ...prev, openAiApiBase: e.target.value }))
+                    }
+                    placeholder="https://api.openai.com/v1 (optional)"
+                  />
+                </Flex>
+              </Flex>
+            </>
+          )}
+
+          {localSettings.apiChoice === "gemini" && (
+            <Flex alignItems="center" mb={2}>
+              <Flex flex={1}>
+                <Text fontSize="md">API Key:</Text>
+              </Flex>
+              <Flex flex={2}>
+                <Input
+                  value={localSettings.apiKeyGemini}
+                  onChange={onChangeGeminiApiKey}
+                  placeholder="AIza..."
+                />
+              </Flex>
+            </Flex>
+          )}
+
+          {localSettings.apiChoice === "local" && (
+            <Flex alignItems="center" mb={2}>
+              <Flex flex={1}>
+                <Text fontSize="md">Ollama URL:</Text>
+              </Flex>
+              <Flex flex={2}>
+                <Input
+                  value={localSettings.localModelUrl}
+                  onChange={onChangeLocalModelUrl}
+                  placeholder="http://localhost:11434"
+                />
+              </Flex>
+            </Flex>
+          )}
+
+          {/* Model selector */}
+          {localSettings.apiChoice !== "local" && (
+            <Flex alignItems="center" mb={2}>
+              <Flex flex={1}>
+                <Text fontSize="md">Model:</Text>
+              </Flex>
+              <Flex flex={2}>
+                <Select
+                  size="md"
+                  value={getModelValue()}
+                  onChange={(e) => setModelValue(e.target.value)}
+                >
+                  <option value="">Default (auto-select)</option>
+                  {availableModels.map((model) => (
+                    <option key={model.id} value={model.id}>
+                      {model.name}
+                    </option>
+                  ))}
+                </Select>
+              </Flex>
+            </Flex>
+          )}
+
+          {localSettings.apiChoice === "local" && availableModels.length > 0 && (
+            <Flex alignItems="center" mb={2}>
+              <Flex flex={1}>
+                <Text fontSize="md">Model:</Text>
+              </Flex>
+              <Flex flex={2}>
+                <Select
+                  size="md"
+                  value={getModelValue()}
+                  onChange={(e) => setModelValue(e.target.value)}
+                >
+                  <option value="">Default (auto-select)</option>
+                  {availableModels.map((model) => (
+                    <option key={model.id} value={model.id}>
+                      {model.name}
+                    </option>
+                  ))}
+                </Select>
+              </Flex>
+            </Flex>
+          )}
+
+          {localSettings.apiChoice === "local" && modelsLoading && (
+            <Flex alignItems="center" mt={2}>
+              <Spinner size="sm" mr={2} />
+              <Text fontSize="sm" color="gray.500">Loading models...</Text>
+            </Flex>
+          )}
+
+          <Text fontSize="sm" color="gray.500" mt={2}>
+            {localSettings.apiChoice === "local"
+              ? "Use Ollama for local models. Models are detected automatically."
+              : "Leave model empty to use the default for this provider."}
+          </Text>
+        </Box>
+
+        <Box>
           <Flex alignItems="center" mb={2}>
-            <Flex flex={1}>
-              <Text fontSize="md" mr={4}>
-                Claude API Key:
-              </Text>
-            </Flex>
-            <Flex flex={2}>
-              <Input
-                value={localSettings.apiKeyClaude}
-                onChange={onChangeClaueApiKey}
-                placeholder="sk-ant-..."
-              />
-            </Flex>
-          </Flex>
-          <Flex alignItems="center" mb={2}>
-            <Flex flex={1}>
-              <Text fontSize="md" mr={4}>
-                Gemini API Key:
-              </Text>
-            </Flex>
-            <Flex flex={2}>
-              <Input
-                value={localSettings.apiKeyGemini}
-                onChange={onChangeGeminiApiKey}
-                placeholder="AIza..."
-              />
-            </Flex>
-          </Flex>
-          <Flex alignItems="center" mb={2}>
-            <Flex flex={1}>
-              <Text fontSize="md" mr={4}>
-                ElevenLabs API Key:
-              </Text>
-            </Flex>
+            <Text fontSize="md" mr={4}>
+              ElevenLabs API Key:
+            </Text>
             <Flex flex={2}>
               <Input
                 value={localSettings.apiKeyElevenlabs}
@@ -453,52 +605,6 @@ export const GeneralSettings = () => {
               />
             </Flex>
           </Flex>
-          <Flex alignItems="center" mb={2}>
-            <Flex flex={1}>
-              <Text fontSize="md" mr={4}>
-                Local Model URL:
-              </Text>
-            </Flex>
-            <Flex flex={2}>
-              <Input
-                value={localSettings.localModelUrl}
-                onChange={onChangeLocalModelUrl}
-                placeholder="http://localhost:11434"
-              />
-            </Flex>
-          </Flex>
-          {localSettings.apiChoice !== "local" && (
-            <Flex alignItems="center" mb={2}>
-              <Flex flex={1}>
-                <Text fontSize="md" mr={4}>
-                  Default Model:
-                </Text>
-              </Flex>
-              <Flex flex={2}>
-                <Input
-                  value={
-                    localSettings.apiChoice === "claude"
-                      ? localSettings.modelClaude
-                      : localSettings.apiChoice === "openai"
-                      ? localSettings.modelOpenai
-                      : localSettings.modelGemini
-                  }
-                  onChange={onChangeModelName}
-                  placeholder={
-                    localSettings.apiChoice === "claude"
-                      ? "claude-sonnet-4-6"
-                      : localSettings.apiChoice === "openai"
-                      ? "gpt-5.4"
-                      : "gemini-3-pro-preview"
-                  }
-                />
-              </Flex>
-            </Flex>
-          )}
-          <Text fontSize="sm" color="gray.500">
-            Select the API to use for natural language processing tasks. For local models, use Ollama (default: http://localhost:11434).
-            {localSettings.apiChoice !== "local" && " Leave the model field empty to use the default."}
-          </Text>
         </Box>
 
         <Box>
@@ -522,7 +628,7 @@ export const GeneralSettings = () => {
         <Box>
           <Flex alignItems="center" mb={2}>
             <Flex flex={1}>
-              <Text fontSize="md" mr={4}>
+              <Text fontSize="md">
                 RAG Context Chunks:
               </Text>
             </Flex>

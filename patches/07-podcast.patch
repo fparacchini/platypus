@@ -1,0 +1,13 @@
+diff --git a/src-tauri/src/engine/podcast_generator.rs b/src-tauri/src/engine/podcast_generator.rs
+index 6b9b39e..9c1bcce 100644
+--- a/src-tauri/src/engine/podcast_generator.rs
++++ b/src-tauri/src/engine/podcast_generator.rs
+@@ -204,7 +204,7 @@ async fn synthesize_speech(api_key: &str, voice_id: &str, text: &str) -> Result<
+ 
+ fn save_podcast_mp3(app_handle: &tauri::AppHandle, bytes: &[u8]) -> Result<String, String> {
+     use std::fs;
+-    use tauri::Manager;
++    
+ 
+     let base = app_handle
+         .path_resolver()

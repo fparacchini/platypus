@@ -1,0 +1,969 @@
+diff --git a/docs/DIARIZATION/README.md b/docs/DIARIZATION/README.md
+new file mode 100644
+index 0000000..9ed3eab
+--- /dev/null
++++ b/docs/DIARIZATION/README.md
+@@ -0,0 +1,237 @@
++# Diarization Architecture (Platypus)
++
++## Scope
++This document describes the diarization architecture currently implemented in Platypus, the architectural choices and tradeoffs, and the code adjustments required to evolve the current implementation.
++
++It covers:
++- Local recording diarization flow
++- Re-diarization of existing text
++- Audio import post-processing flow
++- Post-diarization polish and raw transcript presentation
++- Current constraints and next implementation steps
++
++## Architecture Diagrams
++
++### Component view
++```mermaid
++flowchart LR
++  A[Audio Source\nLocal Recording or Imported File] --> B[Transcription Layer\nLocal Whisper or OpenAI]
++  B --> C{Diarization Enabled}
++  C -- No --> D[Raw Transcript]
++  C -- Yes --> E[Diarization Layer\nStreamingDiarizer or Text Re-diarization]
++  E --> F[Speaker Segments\nDiarizedSegment[]]
++  F --> G[Post-processing\nAuto-Polish + Language Mode]
++  G --> H[Renderer\nPolished + Raw HTML]
++  D --> H
++  H --> I[(projects_activities.full_document_text)]
++  F --> J[(projects_activities.diarization_json)]
++  H --> K[Frontend Editor\nTipTap]
++```
++
++### Audio import enriched sequence
++```mermaid
++sequenceDiagram
++  participant UI as Projects.tsx
++  participant API as main.rs::import_audio_file_enriched
++  participant TR as transcription_engine
++  participant DR as diarization_engine
++  participant CL as document_cleanup_engine
++
++  UI->>API: import_audio_file_enriched(filePath)
++  API->>TR: transcribe_audio_with_preferred_provider(filePath)
++  TR-->>API: transcript text
++  API->>DR: rediarize_existing_text(transcript, max_speakers)
++  DR-->>API: DiarizedSegment[]
++  API->>CL: auto_polish_diarized_transcript(raw_text)
++  alt polish success
++    CL-->>API: polished text
++    API-->>UI: note_html(polished+raw), diarization_json, note_title
++  else polish failure
++    CL-->>API: error
++    API-->>UI: note_html(raw only), diarization_json, note_title
++  end
++```
++
++## Current Architecture
++
++### High-level pipeline
++1. Audio is captured (local recording) or imported (ogg/wav/mp3).
++2. Speech transcription is produced (local Whisper or OpenAI, with fallback logic).
++3. Diarization is applied when enabled:
++- Live local recording: chunk-level assignment during capture plus final merge.
++- Existing transcript/imported audio: text-based re-diarization pass.
++4. Post-processing runs at diarization completion:
++- Auto-polish with LLM (language mode aware).
++- Raw transcript preserved and rendered.
++5. Final note is persisted as polished-first + raw-readable content.
++
++### Backend modules and responsibilities
++- `src-tauri/src/engine/diarization_engine.rs`
++- Provides `StreamingDiarizer` (centroid tracking, cosine similarity, thresholding).
++- Provides `DiarizationEngine` model loader and embedding API.
++- Provides text-level re-diarization (`rediarize_existing_text`).
++- Provides speaker-segment formatting and merge helpers.
++
++- `src-tauri/src/main.rs`
++- Wires commands into Tauri.
++- Maintains global runtime state (`DIARIZATION_ENGINE`, `STREAMING_DIARIZER`, `DIARIZED_SEGMENTS`).
++- Applies diarization during recording stop path.
++- Exposes re-diarization command for existing notes.
++- Composes polished/raw HTML structures.
++- Handles enriched audio import (`import_audio_file_enriched`) with diarization, polish, and smart note title generation.
++
++- `src-tauri/src/engine/document_cleanup_engine.rs`
++- Implements transcript polish logic.
++- Supports language behavior:
++  - `keep_original`
++  - `translate` to target language.
++- Provides short note title generation for imported audio notes.
++
++- `src-tauri/src/engine/transcription_engine.rs`
++- Handles OpenAI Whisper upload constraints.
++- Normalizes `.ogg` to WAV for compatibility.
++- Applies compression ladder and chunked transcription fallback for large files.
++
++### Frontend integration
++- `src/features/Projects/Projects.tsx`
++- Uses enriched audio import command.
++- Saves returned note HTML, title, and diarization JSON.
++- Displays live speaker-colored chunks during local recording.
++- Provides manual "Redo diarization" action.
++
++- `src/features/GeneralSettings.tsx`
++- Exposes diarization controls (`use_diarization`, `max_speakers`).
++- Exposes post-diarization language controls:
++  - `polish_language_mode`
++  - `polish_target_language`.
++
++## Implemented Data and Rendering Model
++
++### Segment model
++`DiarizedSegment`:
++- `speaker_id: u32`
++- `text: String`
++
++### Persisted outputs
++- `diarization_json` stores structured diarization segments.
++- Note body stores HTML with two logical sections:
++1. Polished transcript (if polish succeeds)
++2. Raw transcript (always intended to remain readable)
++
++### Presentation behavior
++- Local live preview: speaker-colored labels in recording panel.
++- Saved note: polished-first and raw section for post-diarized content.
++- Imported audio now follows enriched post-processing pipeline for consistency.
++
++## Architectural Choices and Tradeoffs
++
++### Choice 1: Streaming centroid diarizer for runtime assignment
++Why:
++- Lightweight and fast enough for local real-time UX.
++- Minimal dependencies for online assignment.
++
++Tradeoffs:
++- Speaker identity is heuristic and may drift over long sessions.
++- Threshold tuning impacts false splits vs merges.
++
++### Choice 2: Text-based re-diarization fallback for existing transcripts/imports
++Why:
++- Enables diarization even when only text is available.
++- Avoids blocking on full audio embedding pipeline.
++
++Tradeoffs:
++- Lower fidelity than acoustic speaker embeddings.
++- Depends on punctuation and transcript quality.
++
++### Choice 3: Preserve raw transcript while auto-polishing
++Why:
++- Maintains auditability and trust.
++- Allows users to inspect unmodified content.
++
++Tradeoffs:
++- Larger note body storage.
++- Potential duplication/noise for long transcripts.
++
++### Choice 4: Language-aware polish mode
++Why:
++- Supports both strict source-language retention and translation workflows.
++
++Tradeoffs:
++- Translation can introduce subtle semantic shifts.
++- Additional model variance by provider.
++
++### Choice 5: Enriched import command returns structured payload
++Why:
++- Keeps orchestration centralized in backend.
++- Reduces frontend branching and duplicated post-processing logic.
++
++Tradeoffs:
++- Larger backend command surface area.
++- Requires stronger contract/version stability between frontend and backend.
++
++### Choice 6: Smart note title generation (date/time + short semantic title)
++Why:
++- Better retrieval and scanning than filename-only naming.
++
++Tradeoffs:
++- LLM dependency for best results.
++- Needs deterministic fallback on model failure.
++
++## Current Limitations
++1. `DiarizationEngine::embed` currently uses a temporary baseline embedding path and not a full ONNX forward pass.
++2. `batch_recluster` is intentionally minimal; full agglomerative post-cluster refinement is not yet complete.
++3. Imported-note speaker coloring is rendered in generated HTML; editor-level semantic segment rendering is still basic.
++4. Long-note HTML representation (polished + raw) may become heavy for very long meetings.
++
++## Required Code Adjustments (Next Iteration)
++
++### P0 (correctness and consistency)
++1. Implement true ONNX inference in `DiarizationEngine::embed` and validate embedding dimensionality consistency.
++2. Upgrade `batch_recluster` with real cluster refinement and deterministic speaker ID remapping.
++3. Add integration tests for `import_audio_file_enriched` output contract:
++- `note_html` non-empty
++- `diarization_json` present when diarization enabled
++- fallback behavior when polish fails.
++4. Ensure raw transcript readability invariant in all post-diarization save paths.
++
++### P1 (quality and UX)
++1. Unify HTML composition helpers in one module to avoid divergence between flows.
++2. Add explicit metadata marker in note HTML for polished/raw sections for future editor tooling.
++3. Add per-import toast summary with polish status and diarization status.
++4. Add title sanitization and max-length normalization tests.
++
++### P2 (performance and maintainability)
++1. Add caching/reuse strategy for diarization model and embedding computations for repeated operations.
++2. Introduce bounded processing for very large transcripts to avoid UI payload bloat.
++3. Add benchmark suite for:
++- real-time local chunk diarization latency
++- import post-processing total latency by file size.
++
++## Operational Settings
++- `use_diarization` (bool)
++- `max_speakers` (int)
++- `polish_language_mode` (`keep_original` or `translate`)
++- `polish_target_language` (string)
++
++These settings are persisted through existing settings repository and consumed by backend processing paths.
++
++## Validation Checklist
++1. Local recording + diarization enabled:
++- final note contains diarization and polished/raw structure.
++2. Import `.ogg` / `.wav` / `.mp3`:
++- diarization applied (if enabled), polished/raw generated, title includes datetime + short topic.
++3. Re-do diarization:
++- re-segmentation saved, polished/raw regenerated.
++4. Polish failure scenario:
++- raw transcript still saved and readable.
++5. Language mode behavior:
++- keep original vs translate target language verified.
++
++## References (key code entry points)
++- `src-tauri/src/engine/diarization_engine.rs`
++- `src-tauri/src/engine/transcription_engine.rs`
++- `src-tauri/src/engine/document_cleanup_engine.rs`
++- `src-tauri/src/main.rs`
++- `src/features/Projects/Projects.tsx`
++- `src/features/GeneralSettings.tsx`
++- `src/Providers/SettingsProvider.tsx`
+diff --git a/src-tauri/migrations/2026-05-14-010000_add_diarization_json/down.sql b/src-tauri/migrations/2026-05-14-010000_add_diarization_json/down.sql
+new file mode 100644
+index 0000000..eba08d4
+--- /dev/null
++++ b/src-tauri/migrations/2026-05-14-010000_add_diarization_json/down.sql
+@@ -0,0 +1 @@
++-- SQLite compatibility: keep column in place on downgrade.
+diff --git a/src-tauri/migrations/2026-05-14-010000_add_diarization_json/up.sql b/src-tauri/migrations/2026-05-14-010000_add_diarization_json/up.sql
+new file mode 100644
+index 0000000..9aebf71
+--- /dev/null
++++ b/src-tauri/migrations/2026-05-14-010000_add_diarization_json/up.sql
+@@ -0,0 +1,2 @@
++ALTER TABLE projects_activities
++ADD COLUMN diarization_json TEXT NOT NULL DEFAULT '';
+diff --git a/src-tauri/src/engine/diarization_engine.rs b/src-tauri/src/engine/diarization_engine.rs
+new file mode 100644
+index 0000000..03d959b
+--- /dev/null
++++ b/src-tauri/src/engine/diarization_engine.rs
+@@ -0,0 +1,586 @@
++use anyhow::{anyhow, Result};
++use log::{info, warn};
++use ort::{session::Session, value::Tensor};
++use serde::{Deserialize, Serialize};
++use std::collections::VecDeque;
++use std::path::PathBuf;
++use std::sync::Mutex;
++
++const WE_SPEAKER_MIN_FRAMES: usize = 50;
++
++#[derive(Debug, Clone, Copy)]
++enum InputLayout {
++    BatchMelsFrames,
++    BatchFramesMels,
++}
++
++#[derive(Debug, Clone, Serialize, Deserialize)]
++pub struct DiarizedSegment {
++    pub speaker_id: u32,
++    pub text: String,
++    pub start_ms: Option<u64>,
++    pub end_ms: Option<u64>,
++    pub language: Option<String>,
++}
++
++#[derive(Debug, Clone)]
++pub struct StreamingDiarizer {
++    centroids: Vec<Vec<f32>>,
++    centroid_sample_counts: Vec<u32>,
++    threshold: f32,
++    max_speakers: usize,
++    stable_speaker_id: Option<u32>,
++    candidate_speaker_id: Option<u32>,
++    candidate_count: u8,
++    recent_primary_ids: VecDeque<u32>,
++}
++
++#[derive(Debug, Clone, Copy)]
++pub struct SpeakerAssignment {
++    pub speaker_id: u32,
++    pub secondary_speaker_id: Option<u32>,
++    pub is_overlap: bool,
++}
++
++impl StreamingDiarizer {
++    pub fn new(threshold: f32, max_speakers: usize) -> Self {
++        Self {
++            centroids: Vec::new(),
++            centroid_sample_counts: Vec::new(),
++            threshold,
++            max_speakers,
++            stable_speaker_id: None,
++            candidate_speaker_id: None,
++            candidate_count: 0,
++            recent_primary_ids: VecDeque::new(),
++        }
++    }
++
++    pub fn reset(&mut self) {
++        self.centroids.clear();
++        self.centroid_sample_counts.clear();
++        self.stable_speaker_id = None;
++        self.candidate_speaker_id = None;
++        self.candidate_count = 0;
++        self.recent_primary_ids.clear();
++    }
++
++    pub fn assign_speaker(&mut self, embedding: &[f32]) -> u32 {
++        self.assign_speaker_with_overlap(embedding).speaker_id
++    }
++
++    pub fn assign_speaker_with_overlap(&mut self, embedding: &[f32]) -> SpeakerAssignment {
++        const OVERLAP_MIN_SIM: f32 = 0.60;
++        const OVERLAP_MAX_GAP: f32 = 0.15;
++
++        if embedding.is_empty() {
++            return SpeakerAssignment {
++                speaker_id: 0,
++                secondary_speaker_id: None,
++                is_overlap: false,
++            };
++        }
++
++        let mut best_idx: Option<usize> = None;
++        let mut best_score = f32::MIN;
++        let mut second_idx: Option<usize> = None;
++        let mut second_score = f32::MIN;
++
++        for (idx, centroid) in self.centroids.iter().enumerate() {
++            let score = cosine_similarity(embedding, centroid);
++            if score > best_score {
++                second_score = best_score;
++                second_idx = best_idx;
++                best_score = score;
++                best_idx = Some(idx);
++            } else if score > second_score {
++                second_score = score;
++                second_idx = Some(idx);
++            }
++        }
++
++        if best_idx.is_none() {
++            self.centroids.push(embedding.to_vec());
++            self.centroid_sample_counts.push(1);
++            let speaker_id = self.smooth_primary_speaker(1);
++            return SpeakerAssignment {
++                speaker_id,
++                secondary_speaker_id: None,
++                is_overlap: false,
++            };
++        }
++
++        let idx = best_idx.unwrap();
++        if best_score < self.threshold && self.centroids.len() < self.max_speakers {
++            self.centroids.push(embedding.to_vec());
++            self.centroid_sample_counts.push(1);
++            let speaker_id = self.smooth_primary_speaker(self.centroids.len() as u32);
++            return SpeakerAssignment {
++                speaker_id,
++                secondary_speaker_id: None,
++                is_overlap: false,
++            };
++        }
++
++        let is_overlap = second_idx.is_some()
++            && best_score >= OVERLAP_MIN_SIM
++            && second_score >= OVERLAP_MIN_SIM
++            && (best_score - second_score).abs() <= OVERLAP_MAX_GAP;
++
++        if is_overlap {
++            return SpeakerAssignment {
++                speaker_id: (idx + 1) as u32,
++                secondary_speaker_id: second_idx.map(|s| (s + 1) as u32),
++                is_overlap: true,
++            };
++        }
++
++        let sample_count = self.centroid_sample_counts.get(idx).copied().unwrap_or(1);
++        let (retain_weight, new_weight) = centroid_update_weights(sample_count);
++
++        // Adaptive centroid update: learn fast early, then stabilize.
++        if let Some(existing) = self.centroids.get_mut(idx) {
++            for i in 0..existing.len().min(embedding.len()) {
++                existing[i] = retain_weight * existing[i] + new_weight * embedding[i];
++            }
++            normalize(existing);
++        }
++
++        if let Some(count) = self.centroid_sample_counts.get_mut(idx) {
++            *count = count.saturating_add(1);
++        }
++
++        let speaker_id = self.smooth_primary_speaker((idx + 1) as u32);
++
++        SpeakerAssignment {
++            speaker_id,
++            secondary_speaker_id: None,
++            is_overlap: false,
++        }
++    }
++
++    fn smooth_primary_speaker(&mut self, raw_speaker_id: u32) -> u32 {
++        const HISTORY_LIMIT: usize = 5;
++        const SWITCH_CONFIRMATIONS: u8 = 2;
++
++        let output = match self.stable_speaker_id {
++            None => {
++                self.stable_speaker_id = Some(raw_speaker_id);
++                self.candidate_speaker_id = None;
++                self.candidate_count = 0;
++                raw_speaker_id
++            }
++            Some(stable) if raw_speaker_id == stable => {
++                self.candidate_speaker_id = None;
++                self.candidate_count = 0;
++                stable
++            }
++            Some(stable) => {
++                if self.candidate_speaker_id == Some(raw_speaker_id) {
++                    self.candidate_count = self.candidate_count.saturating_add(1);
++                } else {
++                    self.candidate_speaker_id = Some(raw_speaker_id);
++                    self.candidate_count = 1;
++                }
++
++                if self.candidate_count >= SWITCH_CONFIRMATIONS {
++                    self.stable_speaker_id = Some(raw_speaker_id);
++                    self.candidate_speaker_id = None;
++                    self.candidate_count = 0;
++                    raw_speaker_id
++                } else {
++                    stable
++                }
++            }
++        };
++
++        self.recent_primary_ids.push_back(output);
++        while self.recent_primary_ids.len() > HISTORY_LIMIT {
++            self.recent_primary_ids.pop_front();
++        }
++
++        output
++    }
++}
++
++fn centroid_update_weights(sample_count: u32) -> (f32, f32) {
++    if sample_count <= 5 {
++        return (0.5, 0.5);
++    }
++
++    if sample_count >= 50 {
++        return (0.95, 0.05);
++    }
++
++    let t = (sample_count - 5) as f32 / 45.0;
++    let retain_weight = 0.5 + (0.45 * t);
++    (retain_weight, 1.0 - retain_weight)
++}
++
++fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
++    if a.is_empty() || b.is_empty() {
++        return 0.0;
++    }
++    let mut dot = 0.0f32;
++    let mut na = 0.0f32;
++    let mut nb = 0.0f32;
++    for i in 0..a.len().min(b.len()) {
++        dot += a[i] * b[i];
++        na += a[i] * a[i];
++        nb += b[i] * b[i];
++    }
++    if na == 0.0 || nb == 0.0 {
++        return 0.0;
++    }
++    dot / (na.sqrt() * nb.sqrt())
++}
++
++fn normalize(v: &mut [f32]) {
++    let norm = (v.iter().map(|x| x * x).sum::<f32>()).sqrt().max(1e-8);
++    for x in v.iter_mut() {
++        *x /= norm;
++    }
++}
++
++pub struct DiarizationEngine {
++    model_path: PathBuf,
++    session: Mutex<Session>,
++    input_layout: Mutex<Option<InputLayout>>,
++}
++
++impl DiarizationEngine {
++    pub fn load(model_path: PathBuf) -> Result<Self> {
++        if !model_path.exists() {
++            return Err(anyhow!("Diarization model not found at {:?}", model_path));
++        }
++
++        let session = Session::builder()?.commit_from_file(&model_path)?;
++        info!("Diarization model ready at {:?}", model_path);
++        Ok(Self {
++            model_path,
++            session: Mutex::new(session),
++            input_layout: Mutex::new(None),
++        })
++    }
++
++    pub fn embed(&self, log_mel: &[Vec<f32>]) -> Result<Vec<f32>> {
++        if log_mel.is_empty() {
++            return Ok(Vec::new());
++        }
++
++        let n_mels = log_mel.first().map(|frame| frame.len()).unwrap_or(0);
++        if n_mels == 0 || log_mel.iter().any(|frame| frame.len() != n_mels) {
++            return Ok(Vec::new());
++        }
++
++        let prepared = prepare_log_mel(log_mel, n_mels);
++        let cached_layout = *self
++            .input_layout
++            .lock()
++            .map_err(|_| anyhow!("Diarization input layout mutex poisoned"))?;
++
++        if let Some(layout) = cached_layout {
++            if let Ok(embedding) = self.run_embedding(&prepared, n_mels, layout) {
++                return Ok(embedding);
++            }
++        }
++
++        for layout in [InputLayout::BatchMelsFrames, InputLayout::BatchFramesMels] {
++            match self.run_embedding(&prepared, n_mels, layout) {
++                Ok(embedding) => {
++                    *self
++                        .input_layout
++                        .lock()
++                        .map_err(|_| anyhow!("Diarization input layout mutex poisoned"))? =
++                        Some(layout);
++                    return Ok(embedding);
++                }
++                Err(err) => {
++                    warn!("Diarization inference failed for {:?}: {}", layout, err);
++                }
++            }
++        }
++
++        Err(anyhow!(
++            "Diarization inference failed for all supported input layouts"
++        ))
++    }
++
++    pub fn model_path(&self) -> &PathBuf {
++        &self.model_path
++    }
++
++    fn run_embedding(
++        &self,
++        prepared: &[f32],
++        n_mels: usize,
++        layout: InputLayout,
++    ) -> Result<Vec<f32>> {
++        let frame_count = prepared.len() / n_mels;
++        if frame_count == 0 {
++            return Ok(Vec::new());
++        }
++
++        let shape = match layout {
++            InputLayout::BatchMelsFrames => vec![1usize, n_mels, frame_count],
++            InputLayout::BatchFramesMels => vec![1usize, frame_count, n_mels],
++        };
++        let input = Tensor::<f32>::from_array((shape, prepared.to_vec().into_boxed_slice()))?;
++
++        let mut session = self
++            .session
++            .lock()
++            .map_err(|_| anyhow!("Diarization session mutex poisoned"))?;
++        let outputs = session.run(ort::inputs![input])?;
++        if outputs.len() == 0 {
++            return Err(anyhow!("Diarization model returned no outputs"));
++        }
++
++        let (_, data) = outputs[0].try_extract_tensor::<f32>()?;
++        if data.is_empty() {
++            return Ok(Vec::new());
++        }
++
++        let mut embedding = data.to_vec();
++        normalize(&mut embedding);
++        Ok(embedding)
++    }
++}
++
++fn prepare_log_mel(log_mel: &[Vec<f32>], n_mels: usize) -> Vec<f32> {
++    let frame_count = log_mel.len().max(WE_SPEAKER_MIN_FRAMES);
++    let mut flattened = vec![0.0f32; frame_count * n_mels];
++
++    for (frame_idx, frame) in log_mel.iter().enumerate() {
++        let base = frame_idx * n_mels;
++        flattened[base..(base + n_mels)].copy_from_slice(frame);
++    }
++
++    if log_mel.len() < frame_count {
++        let src_start = (log_mel.len().saturating_sub(1)) * n_mels;
++        let last_frame = if log_mel.is_empty() {
++            vec![0.0f32; n_mels]
++        } else {
++            flattened[src_start..(src_start + n_mels)].to_vec()
++        };
++        for frame_idx in log_mel.len()..frame_count {
++            let base = frame_idx * n_mels;
++            flattened[base..(base + n_mels)].copy_from_slice(&last_frame);
++        }
++    }
++
++    flattened
++}
++
++pub fn diarization_model_dir() -> PathBuf {
++    dirs::data_dir()
++        .unwrap_or_else(|| PathBuf::from("."))
++        .join("platypus_notes")
++        .join("models")
++}
++
++pub fn diarization_model_path() -> PathBuf {
++    diarization_model_dir().join("wespeaker-resnet34-lm.onnx")
++}
++
++pub fn is_diarization_model_downloaded() -> bool {
++    let path = diarization_model_path();
++    path.exists() && path.metadata().map(|m| m.len() > 1_000_000).unwrap_or(false)
++}
++
++pub async fn download_diarization_model(app_handle: &tauri::AppHandle) -> Result<()> {
++    use futures::StreamExt;
++    use std::io::Write;
++    use tauri::Manager;
++
++    const MODEL_URL: &str = "https://huggingface.co/wespeaker/wespeaker-voxceleb-resnet34-LM/resolve/main/wespeaker_resnet34_LM.onnx";
++
++    let dir = diarization_model_dir();
++    std::fs::create_dir_all(&dir)?;
++
++    let dest = diarization_model_path();
++    let tmp = dest.with_extension("onnx.tmp");
++
++    let client = reqwest::Client::builder()
++        .timeout(std::time::Duration::from_secs(3600))
++        .connect_timeout(std::time::Duration::from_secs(30))
++        .build()?;
++
++    let resp = client.get(MODEL_URL).send().await?;
++    if !resp.status().is_success() {
++        return Err(anyhow!(
++            "Diarization model download failed with status {}",
++            resp.status()
++        ));
++    }
++
++    let total_size = resp.content_length().unwrap_or(0);
++    let mut file = std::fs::File::create(&tmp)?;
++    let mut downloaded: u64 = 0;
++    let mut last_percent: u8 = 0;
++    let mut stream = resp.bytes_stream();
++
++    while let Some(chunk) = stream.next().await {
++        let chunk = chunk?;
++        file.write_all(&chunk)?;
++        downloaded += chunk.len() as u64;
++
++        if total_size > 0 {
++            let percent = ((downloaded as f64 / total_size as f64) * 100.0) as u8;
++            if percent != last_percent {
++                last_percent = percent;
++                if let Some(w) = app_handle.get_window("main") {
++                    let _ = w.emit(
++                        "diarization-download-progress",
++                        serde_json::json!({ "percent": percent }),
++                    );
++                }
++            }
++        }
++    }
++
++    drop(file);
++    std::fs::rename(&tmp, &dest)?;
++    info!("Diarization model downloaded successfully to {:?}", dest);
++    Ok(())
++}
++
++pub fn merge_adjacent_segments(segments: &[DiarizedSegment]) -> Vec<DiarizedSegment> {
++    if segments.is_empty() {
++        return Vec::new();
++    }
++
++    let mut merged: Vec<DiarizedSegment> = Vec::new();
++    for seg in segments {
++        if let Some(last) = merged.last_mut() {
++            if last.speaker_id == seg.speaker_id {
++                if !last.text.is_empty() && !seg.text.is_empty() {
++                    last.text.push(' ');
++                }
++                last.text.push_str(&seg.text);
++                continue;
++            }
++        }
++        merged.push(seg.clone());
++    }
++
++    merged
++}
++
++pub fn batch_recluster(segments: &mut [DiarizedSegment], max_speakers: usize) {
++    if segments.is_empty() || max_speakers == 0 {
++        return;
++    }
++
++    // Start implementation: keep deterministic IDs in this phase.
++    // Full agglomerative re-clustering over embeddings lands next.
++    if segments.len() > 400 {
++        warn!("Skipping recluster for very long transcript ({} chunks)", segments.len());
++    }
++}
++
++fn split_into_text_units(text: &str) -> Vec<String> {
++    let normalized = text
++        .replace('\n', " ")
++        .replace('\r', " ")
++        .split_whitespace()
++        .collect::<Vec<_>>()
++        .join(" ");
++
++    if normalized.is_empty() {
++        return Vec::new();
++    }
++
++    let mut units: Vec<String> = Vec::new();
++    let mut current = String::new();
++    for ch in normalized.chars() {
++        current.push(ch);
++        if matches!(ch, '.' | '!' | '?' | ';' | ':') {
++            let chunk = current.trim();
++            if !chunk.is_empty() {
++                units.push(chunk.to_string());
++            }
++            current.clear();
++        }
++    }
++
++    let trailing = current.trim();
++    if !trailing.is_empty() {
++        units.push(trailing.to_string());
++    }
++
++    if units.is_empty() {
++        return vec![normalized];
++    }
++
++    // Merge very short units to reduce noisy speaker switches.
++    let mut merged: Vec<String> = Vec::new();
++    for unit in units {
++        if unit.len() < 28 {
++            if let Some(last) = merged.last_mut() {
++                last.push(' ');
++                last.push_str(&unit);
++                continue;
++            }
++        }
++        merged.push(unit);
++    }
++
++    merged
++}
++
++fn text_embedding(text: &str, dims: usize) -> Vec<f32> {
++    let mut vec = vec![0.0f32; dims];
++    if dims == 0 {
++        return vec;
++    }
++
++    for token in text
++        .to_lowercase()
++        .split(|c: char| !c.is_alphanumeric())
++        .filter(|t| t.len() > 2)
++    {
++        let mut hash: u64 = 1469598103934665603;
++        for b in token.bytes() {
++            hash ^= b as u64;
++            hash = hash.wrapping_mul(1099511628211);
++        }
++        let idx = (hash as usize) % dims;
++        vec[idx] += 1.0;
++    }
++
++    normalize(&mut vec);
++    vec
++}
++
++pub fn rediarize_existing_text(text: &str, max_speakers: usize) -> Vec<DiarizedSegment> {
++    let units = split_into_text_units(text);
++    if units.is_empty() {
++        return Vec::new();
++    }
++
++    let mut diarizer = StreamingDiarizer::new(0.84, max_speakers.max(1));
++    let mut segments = Vec::with_capacity(units.len());
++
++    for unit in units {
++        let embedding = text_embedding(&unit, 64);
++        let speaker_id = diarizer.assign_speaker(&embedding);
++        segments.push(DiarizedSegment {
++            speaker_id,
++            text: unit,
++            start_ms: None,
++            end_ms: None,
++            language: None,
++        });
++    }
++
++    merge_adjacent_segments(&segments)
++}
++
++pub fn format_segments_as_plain_text(segments: &[DiarizedSegment]) -> String {
++    segments
++        .iter()
++        .map(|s| format!("Speaker {}: {}", s.speaker_id, s.text.trim()))
++        .collect::<Vec<String>>()
++        .join("\n")
++}
+diff --git a/src-tauri/src/engine/mel_filterbank.rs b/src-tauri/src/engine/mel_filterbank.rs
+new file mode 100644
+index 0000000..0732342
+--- /dev/null
++++ b/src-tauri/src/engine/mel_filterbank.rs
+@@ -0,0 +1,103 @@
++use rustfft::num_complex::Complex;
++use rustfft::FftPlanner;
++
++const SAMPLE_RATE: usize = 16_000;
++const FRAME_SIZE: usize = 400; // 25ms
++const HOP_SIZE: usize = 160; // 10ms
++const N_FFT: usize = 512;
++
++fn hz_to_mel(hz: f32) -> f32 {
++    2595.0 * (1.0 + hz / 700.0).log10()
++}
++
++fn mel_to_hz(mel: f32) -> f32 {
++    700.0 * (10f32.powf(mel / 2595.0) - 1.0)
++}
++
++fn hann_window(size: usize) -> Vec<f32> {
++    (0..size)
++        .map(|i| {
++            0.5 - 0.5 * ((2.0 * std::f32::consts::PI * i as f32) / (size as f32 - 1.0)).cos()
++        })
++        .collect()
++}
++
++fn build_mel_filterbank(n_mels: usize) -> Vec<Vec<f32>> {
++    let n_freqs = N_FFT / 2 + 1;
++    let mel_min = hz_to_mel(0.0);
++    let mel_max = hz_to_mel((SAMPLE_RATE / 2) as f32);
++
++    let mel_points: Vec<f32> = (0..(n_mels + 2))
++        .map(|i| mel_min + (i as f32) * (mel_max - mel_min) / ((n_mels + 1) as f32))
++        .collect();
++
++    let hz_points: Vec<f32> = mel_points.iter().map(|m| mel_to_hz(*m)).collect();
++    let bins: Vec<usize> = hz_points
++        .iter()
++        .map(|hz| (((N_FFT + 1) as f32 * hz) / SAMPLE_RATE as f32) as usize)
++        .collect();
++
++    let mut filters = vec![vec![0.0f32; n_freqs]; n_mels];
++
++    for mel_idx in 0..n_mels {
++        let left = bins[mel_idx].min(n_freqs.saturating_sub(1));
++        let center = bins[mel_idx + 1].min(n_freqs.saturating_sub(1));
++        let right = bins[mel_idx + 2].min(n_freqs.saturating_sub(1));
++
++        if left >= center || center >= right {
++            continue;
++        }
++
++        for k in left..center {
++            filters[mel_idx][k] = (k - left) as f32 / (center - left) as f32;
++        }
++        for k in center..right {
++            filters[mel_idx][k] = (right - k) as f32 / (right - center) as f32;
++        }
++    }
++
++    filters
++}
++
++pub fn extract_log_mel(samples_16k: &[f32], n_mels: usize) -> Vec<Vec<f32>> {
++    if samples_16k.len() < FRAME_SIZE || n_mels == 0 {
++        return Vec::new();
++    }
++
++    let window = hann_window(FRAME_SIZE);
++    let mel_filters = build_mel_filterbank(n_mels);
++    let mut planner = FftPlanner::new();
++    let fft = planner.plan_fft_forward(N_FFT);
++
++    let mut features: Vec<Vec<f32>> = Vec::new();
++    let mut pos = 0usize;
++
++    while pos + FRAME_SIZE <= samples_16k.len() {
++        let mut frame: Vec<Complex<f32>> = vec![Complex::new(0.0, 0.0); N_FFT];
++        for i in 0..FRAME_SIZE {
++            frame[i].re = samples_16k[pos + i] * window[i];
++        }
++
++        fft.process(&mut frame);
++
++        let power_spectrum: Vec<f32> = frame[..(N_FFT / 2 + 1)]
++            .iter()
++            .map(|c| (c.re * c.re) + (c.im * c.im))
++            .collect();
++
++        let mut mel_vec = vec![0.0f32; n_mels];
++        for (m, filter) in mel_filters.iter().enumerate() {
++            let energy = filter
++                .iter()
++                .zip(power_spectrum.iter())
++                .map(|(f, p)| f * p)
++                .sum::<f32>();
++            mel_vec[m] = (energy.max(1e-10)).ln();
++        }
++
++        features.push(mel_vec);
++        pos += HOP_SIZE;
++    }
++
++    features
++}
+diff --git a/src-tauri/src/engine/mod.rs b/src-tauri/src/engine/mod.rs
+index bd5d89a..259e0f4 100644
+--- a/src-tauri/src/engine/mod.rs
++++ b/src-tauri/src/engine/mod.rs
+@@ -15,3 +15,5 @@ pub mod meeting_popup;
+ pub mod whisper_engine;
+ pub mod audio_processor;
+ pub mod podcast_generator;
++pub mod mel_filterbank;
++pub mod diarization_engine;

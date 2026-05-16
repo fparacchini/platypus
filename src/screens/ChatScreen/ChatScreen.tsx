@@ -429,20 +429,46 @@ export const ChatScreen: FC = () => {
 //   };
 // }, []);
 
+  // Fetch available models and set default when provider changes
   useEffect(() => {
-    // Set default model based on provider preference
-    const defaultModel = (() => {
-      switch (settings.api_choice) {
-        case "claude": return "claude-sonnet-4-6";
-        case "openai": return "gpt-5.4";
-        case "gemini": return "gemini-3-pro-preview";
-        case "local": return "llama3.3:70b";
-        default: return "claude-sonnet-4-6";
+    const fetchDefaultModel = async () => {
+      const provider = settings.api_choice;
+
+      if (provider === "claude" || provider === "gemini") {
+        const cloudModels: Record<string, string[]> = {
+          claude: ["claude-sonnet-4-6", "claude-opus-4-6"],
+          gemini: ["gemini-3-pro-preview"],
+        };
+        const models = cloudModels[provider] || [];
+        setCurrentModelId(settings.model_claude || settings.model_openai || settings.model_gemini || models[0] || "");
+        return;
       }
-    })();
-    
-    setCurrentModelId(defaultModel);
-  }, [settings.api_choice]);
+
+      if (provider === "openai") {
+        try {
+          const models = await invoke<string[]>("list_openai_models");
+          setCurrentModelId(settings.model_openai || models[0] || "");
+          return;
+        } catch {
+          setCurrentModelId(settings.model_openai || "gpt-5.4");
+          return;
+        }
+      }
+
+      if (provider === "local") {
+        try {
+          const models = await invoke<string[]>("list_local_models");
+          setCurrentModelId(models[0] || "");
+          return;
+        } catch {
+          setCurrentModelId("llama3.3:70b");
+          return;
+        }
+      }
+    };
+
+    fetchDefaultModel();
+  }, [settings.api_choice, settings.model_claude, settings.model_openai, settings.model_gemini]);
   
   useEffect(() => {
     if (selectedChatId) {

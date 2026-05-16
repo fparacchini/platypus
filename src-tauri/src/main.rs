@@ -28,9 +28,9 @@ use crate::configuration::database;
 use crate::configuration::database::drop_database_handle;
 use crate::configuration::state::{AppState, ServiceAccess};
 use crate::engine::chat_engine::{name_conversation, send_prompt_to_llm};
-use crate::engine::chat_engine_openai::{send_prompt_to_openai};
+use crate::engine::chat_engine_openai::{send_prompt_to_openai, list_openai_models};
 use crate::engine::chat_engine_gemini::{name_conversation_gemini, send_prompt_to_gemini};
-use crate::engine::chat_engine_local::{name_conversation_local, send_prompt_to_local};
+use crate::engine::chat_engine_local::{name_conversation_local, send_prompt_to_local, list_local_models};
 use crate::engine::clean_up_engine::clean_up;
 use crate::engine::document_cleanup_engine::{clean_up_document_with_llm, summarize_as_meeting_notes, generate_slides_from_document, polish_transcript_with_llm, generate_note_title_with_llm};
 use crate::engine::podcast_generator::{generate_podcast_from_document, list_elevenlabs_voices};
@@ -203,9 +203,11 @@ async fn main() {
             send_prompt_to_openai,
             send_prompt_to_gemini,
             send_prompt_to_local,
+            list_openai_models,
 
             name_conversation_gemini,
             name_conversation_local,
+            list_local_models,
             name_conversation,
             create_chat,
             get_all_chats,

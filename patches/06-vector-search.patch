@@ -1,0 +1,172 @@
+diff --git a/src-tauri/src/engine/project_vector_engine.rs b/src-tauri/src/engine/project_vector_engine.rs
+index a784e41..4b3a48c 100644
+--- a/src-tauri/src/engine/project_vector_engine.rs
++++ b/src-tauri/src/engine/project_vector_engine.rs
+@@ -71,11 +71,13 @@ pub async fn add_chunk_to_project_vectors(
+     chunk_id: i64,
+     chunk_text: &str,
+     api_key: &str,
++    api_base: Option<&str>,
++    model: Option<&str>,
+ ) -> Result<()> {
+     let db_arc = get_project_vector_db(app_handle, project_id).await?;
+     let db = db_arc.lock().await;
+     
+-    db.add(chunk_id, chunk_text, api_key).await?;
++    db.add(chunk_id, chunk_text, api_key, api_base, model).await?;
+     
+     info!("Added chunk {} to project {} vector index", chunk_id, project_id);
+     Ok(())
+@@ -88,11 +90,13 @@ pub async fn search_project_vectors(
+     query: &str,
+     top_k: usize,
+     api_key: &str,
++    api_base: Option<&str>,
++    model: Option<&str>,
+ ) -> Result<Vec<(i64, f32)>> {
+     let db_arc = get_project_vector_db(app_handle, project_id).await?;
+     let db = db_arc.lock().await;
+ 
+-    let results = db.top_k(query, top_k, api_key).await?;
++    let results = db.top_k(query, top_k, api_key, api_base, model).await?;
+ 
+     // Convert usize IDs to i64
+     let results: Vec<(i64, f32)> = results
+@@ -114,6 +118,8 @@ pub async fn search_project_vectors_live(
+     query: &str,
+     top_k: usize,
+     api_key: &str,
++    api_base: Option<&str>,
++    model: Option<&str>,
+ ) -> Result<Vec<(i64, f32)>> {
+     use crate::configuration::state::ServiceAccess;
+     use crate::repository::chunk_repository::get_chunk_ids_for_project;
+@@ -131,7 +137,7 @@ pub async fn search_project_vectors_live(
+     let db_arc = get_project_vector_db(app_handle, project_id).await?;
+     let db = db_arc.lock().await;
+ 
+-    let results = db.top_k_filtered(query, top_k, api_key, &live_ids).await?;
++    let results = db.top_k_filtered(query, top_k, api_key, &live_ids, api_base, model).await?;
+ 
+     let results: Vec<(i64, f32)> = results
+         .into_iter()
+diff --git a/src-tauri/src/engine/similarity_search_engine.rs b/src-tauri/src/engine/similarity_search_engine.rs
+index dee9912..b48a562 100644
+--- a/src-tauri/src/engine/similarity_search_engine.rs
++++ b/src-tauri/src/engine/similarity_search_engine.rs
+@@ -141,7 +141,7 @@ const IS_TEST: bool = cfg!(test);
+ 
+ const MAX_CHARS: usize = 7900;
+ 
+-async fn get_embedding(text: &str, api_key: &str) -> Result<Vec<f32>> {
++async fn get_embedding(text: &str, api_key: &str, api_base: Option<&str>, model: Option<&str>) -> Result<Vec<f32>> {
+     if IS_TEST {
+         return Ok(vec![0.0; 512]);
+     }
+@@ -152,7 +152,7 @@ async fn get_embedding(text: &str, api_key: &str) -> Result<Vec<f32>> {
+         text
+     };
+ 
+-    compute_vector_embedding(truncated_text, api_key)
++    compute_vector_embedding(truncated_text, api_key, api_base, model)
+         .await
+         .map_err(|e| anyhow!("{}", e))
+ }
+@@ -218,8 +218,8 @@ impl SimilaritySearch {
+         Ok(())
+     }
+ 
+-    pub async fn add(&self, id: i64, text: &str, api_key: &str) -> Result<()> {
+-        let vector_res = get_embedding(text, api_key).await;
++    pub async fn add(&self, id: i64, text: &str, api_key: &str, api_base: Option<&str>, model: Option<&str>) -> Result<()> {
++        let vector_res = get_embedding(text, api_key, api_base, model).await;
+         let vector = match vector_res {
+             Ok(v) => v,
+             Err(e) => {
+@@ -248,12 +248,14 @@ impl SimilaritySearch {
+         query_text: &str,
+         top_k: usize,
+         api_key: &str,
++        api_base: Option<&str>,
++        model: Option<&str>,
+     ) -> Result<Vec<(usize, f32)>> {
+         info!(
+             "Performing similarity search in HNSW Index: Query={}",
+             query_text
+         );
+-        let query_vector_res = get_embedding(query_text, api_key).await;
++        let query_vector_res = get_embedding(query_text, api_key, api_base, model).await;
+         let query_vector = match query_vector_res {
+             Ok(v) => v,
+             Err(e) => {
+@@ -296,6 +298,8 @@ impl SimilaritySearch {
+         top_k: usize,
+         api_key: &str,
+         allowed_ids: &[i64],
++        api_base: Option<&str>,
++        model: Option<&str>,
+     ) -> Result<Vec<(usize, f32)>> {
+         if allowed_ids.is_empty() {
+             info!("No allowed IDs provided, returning empty results");
+@@ -310,7 +314,7 @@ impl SimilaritySearch {
+             query_text, search_k, allowed_ids.len()
+         );
+ 
+-        let all_results = self.top_k(query_text, search_k, api_key).await?;
++        let all_results = self.top_k(query_text, search_k, api_key, api_base, model).await?;
+         
+         // Filter to only allowed IDs
+         let allowed_set: std::collections::HashSet<i64> = allowed_ids.iter().copied().collect();
+@@ -341,13 +345,13 @@ mod tests {
+         let db_path = temp_dir.path().join("test.db");
+         let collection_name = "test_collection";
+         let mut index = SimilaritySearch::open(db_path.to_str().unwrap(), collection_name)?;
+-        index.add(1, "hello world", "").await?;
+-        let candidates = index.top_k("hello world", 1, "").await?;
++        index.add(1, "hello world", "", None, None).await?;
++        let candidates = index.top_k("hello world", 1, "", None, None).await?;
+         assert_eq!(candidates, vec![(1, 0.0)]);
+         index.close().await?;
+         drop(index);
+         let index = SimilaritySearch::open(db_path.to_str().unwrap(), collection_name)?;
+-        let candidates = index.top_k("hello world", 1, "").await?;
++        let candidates = index.top_k("hello world", 1, "", None, None).await?;
+         assert_eq!(candidates, vec![(1, 0.0)]);
+         Ok(())
+     }
+diff --git a/src-tauri/src/repository/vector_db_repository.rs b/src-tauri/src/repository/vector_db_repository.rs
+index 6e1b5bf..41e48cf 100644
+--- a/src-tauri/src/repository/vector_db_repository.rs
++++ b/src-tauri/src/repository/vector_db_repository.rs
+@@ -1,14 +1,27 @@
+ use std::error::Error;
+ use async_openai::{types::CreateEmbeddingRequestArgs, Client, config::OpenAIConfig};
+ 
++const DEFAULT_EMBED_MODEL: &str = "text-embedding-3-small";
++
+ // Correct async function for computing vector embeddings
+-pub async fn compute_vector_embedding(text: &str, api_key: &str) -> Result<Vec<f32>, Box<dyn Error>> {
+-    let config: OpenAIConfig = OpenAIConfig::new()
+-    .with_api_key(api_key);
++pub async fn compute_vector_embedding(text: &str, api_key: &str, api_base: Option<&str>, model: Option<&str>) -> Result<Vec<f32>, Box<dyn Error>> {
++    let config: OpenAIConfig = if let Some(base) = api_base {
++        if !base.trim().is_empty() {
++            OpenAIConfig::new()
++                .with_api_key(api_key)
++                .with_api_base(url::Url::parse(base).expect("Invalid OpenAI base URL"))
++        } else {
++            OpenAIConfig::new().with_api_key(api_key)
++        }
++    } else {
++        OpenAIConfig::new().with_api_key(api_key)
++    };
++
++    let embed_model = model.unwrap_or(DEFAULT_EMBED_MODEL);
+ 
+     let client = Client::with_config(config);
+     let request = CreateEmbeddingRequestArgs::default()
+-        .model("text-embedding-3-small")
++        .model(embed_model)
+         .input([text])
+         .build()?;
+     let response = client.embeddings().create(request).await?;
