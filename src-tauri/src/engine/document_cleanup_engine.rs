@@ -24,6 +24,45 @@ const CLEANUP_SYSTEM_PROMPT: &str = r##"You are a note cleanup assistant. Clean 
 
 Return ONLY the cleaned markdown. No explanations, no preamble, no wrapping in code fences."##;
 
+const NOTE_TITLE_SYSTEM_PROMPT: &str = r##"You generate short titles for imported voice notes.
+
+Rules:
+- Return only the title text, no quotes, no markdown, no labels
+- Keep it concise: maximum 8 words
+- Capture the main topic of the transcript
+- Do not include dates or times in the generated text
+- Keep the same language as the transcript
+- If uncertain, return a neutral concise title"##;
+
+fn build_transcript_cleanup_prompt(language_mode: &str, target_language: Option<&str>) -> String {
+    let mode = language_mode.trim().to_ascii_lowercase();
+    let target = target_language
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .unwrap_or("Italian");
+
+    let language_rule = if mode == "translate" {
+        format!(
+            "- Translate the final polished output to {}. Keep speaker labels and meaning intact",
+            target
+        )
+    } else {
+        "- Keep the final polished output in the same language as the source text".to_string()
+    };
+
+    format!(
+        r##"You are a transcript cleanup assistant. Clean up the following raw transcript into well-organized markdown:
+
+- Fix grammar, spelling, and punctuation
+- Preserve original meaning, names, decisions, and facts
+- If the transcript contains multiple speakers, preserve speaker labels
+{}
+
+Return ONLY the cleaned markdown. No explanations, no preamble, no wrapping in code fences."##,
+        language_rule
+    )
+}
+
 const MEETING_SUMMARY_SYSTEM_PROMPT: &str = r##"You are a meeting notes assistant. Transform the following raw text into concise meeting notes in markdown:
 
 ## Summary
@@ -158,6 +197,44 @@ pub async fn clean_up_document_with_llm(
 ) -> Result<String, String> {
     info!("Cleaning up document with provider: {}, model: {:?}", provider, model_id);
     send_to_llm(&app_handle, &plain_text, &provider, model_id, CLEANUP_SYSTEM_PROMPT).await
+}
+
+pub async fn generate_note_title_with_llm(
+    app_handle: tauri::AppHandle,
+    plain_text: String,
+    provider: String,
+    model_id: Option<String>,
+) -> Result<String, String> {
+    let input = if plain_text.len() > 6000 {
+        plain_text[..6000].to_string()
+    } else {
+        plain_text
+    };
+
+    info!(
+        "Generating short note title with provider: {}, model: {:?}",
+        provider, model_id
+    );
+
+    send_to_llm(&app_handle, &input, &provider, model_id, NOTE_TITLE_SYSTEM_PROMPT).await
+}
+
+#[tauri::command]
+pub async fn polish_transcript_with_llm(
+    app_handle: tauri::AppHandle,
+    plain_text: String,
+    provider: String,
+    model_id: Option<String>,
+    language_mode: Option<String>,
+    target_language: Option<String>,
+) -> Result<String, String> {
+    let mode = language_mode.unwrap_or_else(|| "keep_original".to_string());
+    let prompt = build_transcript_cleanup_prompt(&mode, target_language.as_deref());
+    info!(
+        "Polishing transcript with provider: {}, model: {:?}, language_mode: {}",
+        provider, model_id, mode
+    );
+    send_to_llm(&app_handle, &plain_text, &provider, model_id, &prompt).await
 }
 
 #[tauri::command]
@@ -350,9 +427,10 @@ async fn call_openai(
     model_id: Option<String>,
     system_prompt: &str,
 ) -> Result<String, String> {
-    let setting = app_handle.db(|db| get_setting(db, "api_key_open_ai").expect("Failed on api_key_open_ai"));
+    let api_key_setting = app_handle.db(|db| get_setting(db, "api_key_open_ai").expect("Failed on api_key_open_ai"));
+    let base_url_setting = app_handle.db(|db| get_setting(db, "openai_api_base").expect("Failed on openai_api_base"));
 
-    if setting.setting_value.is_empty() {
+    if api_key_setting.setting_value.is_empty() {
         return Err("OpenAI API key is not configured. Please set it in Settings.".to_string());
     }
 
@@ -380,7 +458,14 @@ async fn call_openai(
         .build()
         .map_err(|e| format!("Failed to build request: {}", e))?;
 
-    let client = OpenAIClient::with_config(OpenAIConfig::new().with_api_key(&setting.setting_value));
+    let config = if !base_url_setting.setting_value.trim().is_empty() {
+        OpenAIConfig::new()
+            .with_api_key(&api_key_setting.setting_value)
+            .with_api_base(url::Url::parse(&base_url_setting.setting_value).expect("Invalid OpenAI base URL"))
+    } else {
+        OpenAIConfig::new().with_api_key(&api_key_setting.setting_value)
+    };
+    let client = OpenAIClient::with_config(config);
     let response = client
         .chat()
         .create(request)
@@ -399,7 +484,7 @@ async fn call_openai(
 async fn call_gemini(
     app_handle: &tauri::AppHandle,
     plain_text: &str,
-    model_id: Option<String>,
+    _model_id: Option<String>,
     system_prompt: &str,
 ) -> Result<String, String> {
     let setting = app_handle.db(|db| get_setting(db, "api_key_gemini").expect("Failed on api_key_gemini"));
