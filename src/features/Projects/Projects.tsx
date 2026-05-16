@@ -48,15 +48,137 @@ import {
   FileUp,
   FolderPlus,
   Mic,
-  Square,
   ClipboardPaste,
   Link as LinkIcon,
+  RefreshCcw,
 } from 'lucide-react';
 import { useGlobalSettings } from "../../Providers/SettingsProvider";
 import { Text } from "@platypus-app/design";
 import { useProject } from "../../state";
 import { ProjectModal } from "@/components";
 import { type Project } from "../../data/project";
+
+type DiarizedSegment = {
+  speaker_id: number;
+  text: string;
+  start_ms?: number | null;
+  end_ms?: number | null;
+  language?: string | null;
+};
+
+type AudioImportProcessedResult = {
+  note_html: string;
+  raw_text: string;
+  diarization_json: string | null;
+  note_title: string;
+  polish_applied: boolean;
+  polished_text: string | null;
+  diarization_model: string | null;
+  synthesis_model: string | null;
+  polish_language_mode: string | null;
+  polish_target_language: string | null;
+};
+
+type AudioImportProgressEvent = {
+  file_path: string;
+  stage: string;
+  progress: number;
+  detail: string;
+};
+
+type ImportUiState = {
+  active: boolean;
+  stage: string;
+  detail: string;
+  currentFile: string;
+  percent: number;
+  completed: number;
+  total: number;
+  etaSeconds: number | null;
+};
+
+const SPEAKER_COLORS = ["teal.600", "purple.600", "orange.600", "blue.600", "pink.600", "green.600"];
+const speakerColor = (speakerId: number) => SPEAKER_COLORS[(speakerId - 1) % SPEAKER_COLORS.length] || "teal.600";
+
+const escapeHtml = (input: string) =>
+  input
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+
+const formatRawDiarizedTranscript = (segments: DiarizedSegment[], fallbackText: string) => {
+  if (!segments.length) return fallbackText;
+  return segments.map((s) => `Speaker ${s.speaker_id}: ${s.text}`).join("\n");
+};
+
+const buildPolishedRawDocumentHtml = (polishedText: string, rawText: string) => {
+  const polished = escapeHtml(polishedText).replace(/\n/g, "<br/>");
+  const raw = escapeHtml(rawText);
+  return `<h2>Polished transcript</h2><p>${polished}</p><hr/><h3>Raw transcript</h3><pre style="white-space: pre-wrap;">${raw}</pre>`;
+};
+
+const buildRawOnlyDocumentHtml = (rawText: string) => {
+  const raw = escapeHtml(rawText);
+  return `<h3>Raw transcript</h3><pre style="white-space: pre-wrap;">${raw}</pre>`;
+};
+
+const getImportStageLabel = (stage: string) => {
+  const normalized = stage.trim().toLowerCase();
+  switch (normalized) {
+    case "queued":
+      return "Queued";
+    case "starting-audio":
+      return "Starting audio import";
+    case "validating":
+      return "Validating file";
+    case "transcribing":
+      return "Transcribing audio (may take a minute)";
+    case "titling":
+      return "Generating title";
+    case "diarizing":
+      return "Detecting speakers";
+    case "polishing":
+      return "Polishing transcript";
+    case "extracting":
+      return "Extracting document text";
+    case "saving":
+      return "Saving note and metadata";
+    case "completed-file":
+      return "File completed";
+    case "failed-file":
+      return "File failed";
+    case "completed":
+      return "Completed";
+    default:
+      return stage;
+  }
+};
+
+const IMPORT_PHASES = [
+  {
+    label: "Preparazione",
+    stages: ["queued", "starting-audio", "validating"],
+  },
+  {
+    label: "Elaborazione",
+    stages: ["transcribing", "extracting", "titling", "diarizing", "polishing"],
+  },
+  {
+    label: "Salvataggio",
+    stages: ["saving", "completed-file", "failed-file", "completed"],
+  },
+];
+
+const getImportPhaseIndex = (stage: string) => {
+  const normalized = stage.trim().toLowerCase();
+  const index = IMPORT_PHASES.findIndex((phase) => phase.stages.includes(normalized));
+  return index >= 0 ? index : 0;
+};
+
+const getSegmentFill = (overallProgress: number, segmentIndex: number, totalSegments: number) =>
+  Math.min(1, Math.max(0, overallProgress * totalSegments - segmentIndex));
 
 //
 // -- Styled Components --
@@ -419,14 +541,33 @@ const ProjectSelector: FC<{
   const [isProcessingRecording, setIsProcessingRecording] = useState(false);
   const [recordingFilePath, setRecordingFilePath] = useState<string | null>(null);
   const [liveTranscript, setLiveTranscript] = useState("");
+  const [liveSegments, setLiveSegments] = useState<DiarizedSegment[]>([]);
   const [isDownloadingModel, setIsDownloadingModel] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [isUrlModalOpen, setIsUrlModalOpen] = useState(false);
   const [urlInput, setUrlInput] = useState("");
   const [isIngestingUrl, setIsIngestingUrl] = useState(false);
+  const [isRediarizingId, setIsRediarizingId] = useState<number | null>(null);
+  const [importUi, setImportUi] = useState<ImportUiState>({
+    active: false,
+    stage: "",
+    detail: "",
+    currentFile: "",
+    percent: 0,
+    completed: 0,
+    total: 0,
+    etaSeconds: null,
+  });
+  const [, setElapsedTicker] = useState(0);
+  const lastEtaRef = useRef<number | null>(null);
   const recordingStartTime = useRef<number | null>(null);
   const recordingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const transcriptUnlistenRef = useRef<(() => void) | null>(null);
+  const finalSegmentsRef = useRef<DiarizedSegment[]>([]);
+  const importStartRef = useRef<number | null>(null);
+  const currentImportFileRef = useRef<string>("");
+  const completedImportsRef = useRef<number>(0);
+  const totalImportsRef = useRef<number>(0);
   
   const toast = useToast();
   const { settings } = useGlobalSettings();
@@ -508,16 +649,17 @@ const ProjectSelector: FC<{
     }
   };
 
-  // Handle file import (PDF, DOCX, TXT, MD) - supports multiple files
+  // Handle file import (documents + audio) - supports multiple files
   const handleFileImport = async () => {
+    let unlistenProgress: (() => void) | null = null;
     try {
       // Open file dialog to select files (multiple allowed)
       const selected = await open({
         multiple: true,
         filters: [{
-          name: 'Documents',
-          extensions: ['pdf', 'docx', 'txt', 'md', 'rtf']
-        }]
+          name: 'Supported files',
+          extensions: ['pdf', 'docx', 'txt', 'md', 'rtf', 'ogg', 'wav', 'mp3']
+        }],
       });
 
       if (!selected) return;
@@ -526,30 +668,94 @@ const ProjectSelector: FC<{
       const filePaths = Array.isArray(selected) ? selected : [selected];
       if (filePaths.length === 0) return;
 
-      // Show loading toast
-      const loadingToast = toast({
-        title: "Importing documents",
-        description: `Processing ${filePaths.length} file${filePaths.length > 1 ? 's' : ''}...`,
-        status: "info",
-        duration: null,
-        isClosable: false,
+      importStartRef.current = Date.now();
+      totalImportsRef.current = filePaths.length;
+      completedImportsRef.current = 0;
+      setImportUi({
+        active: true,
+        stage: "queued",
+        detail: "Preparing import pipeline",
+        currentFile: "",
+        percent: 0,
+        completed: 0,
+        total: filePaths.length,
+        etaSeconds: null,
+      });
+
+      unlistenProgress = await listen<AudioImportProgressEvent>("audio-import-progress", (event) => {
+        const payload = event.payload;
+        if (!payload || payload.file_path !== currentImportFileRef.current) return;
+        updateImportUi(payload.stage, payload.detail, payload.progress);
       });
 
       let successCount = 0;
       let lastActivityId: number | undefined;
+      const failedImports: string[] = [];
 
       for (const filePath of filePaths) {
         try {
-          // Extract text from file using Tauri command
-          const extractedText = await invoke<string>('extract_document_text', {
-            filePath
-          });
+          currentImportFileRef.current = filePath;
+          const extension = (filePath.split('.').pop() || '').toLowerCase();
+          const isAudioImport = ['ogg', 'wav', 'mp3'].includes(extension);
 
-          // Get filename without extension for the document title
-          const fileName = filePath.split('/').pop() || filePath.split('\\').pop() || '';
-          const documentName = fileName.includes('.')
-            ? fileName.substring(0, fileName.lastIndexOf('.'))
-            : fileName;
+          let extractedText: string;
+          let documentName: string;
+          let diarizationJson: string | null = null;
+          let polishApplied = true;
+          let polishedText: string | null = null;
+          let diarizationModel: string | null = null;
+          let synthesisModel: string | null = null;
+          let polishLanguageMode: string | null = null;
+          let polishTargetLanguage: string | null = null;
+
+          if (isAudioImport) {
+            updateImportUi("starting-audio", "Starting audio processing", 0.02);
+            const result = await invoke<AudioImportProcessedResult>('import_audio_file_enriched', { filePath });
+            extractedText = result.note_html;
+            documentName = result.note_title;
+            diarizationJson = result.diarization_json;
+            polishApplied = result.polish_applied;
+            polishedText = result.polished_text;
+            diarizationModel = result.diarization_model;
+            synthesisModel = result.synthesis_model;
+            polishLanguageMode = result.polish_language_mode;
+            polishTargetLanguage = result.polish_target_language;
+          } else {
+            // Document extraction with heartbeat progress
+            updateImportUi("extracting", "Extracting document text", 0.15);
+            
+            // Spawn heartbeat task to show progress while extracting
+            let extractionDone = false;
+            const heartbeatInterval = setInterval(() => {
+              if (!extractionDone) {
+                const total = Math.max(1, totalImportsRef.current);
+                const completed = completedImportsRef.current;
+                let currentProgress = (completed + 0.15) / total;
+                currentProgress = Math.min(0.60, currentProgress + 0.025); // Gradually increase up to 60%
+                const currentName = currentImportFileRef.current.split('/').pop()
+                  || currentImportFileRef.current.split('\\').pop()
+                  || currentImportFileRef.current;
+                setImportUi(prev => ({
+                  ...prev,
+                  percent: Math.round(currentProgress * 100),
+                  detail: "Extracting document text",
+                  currentFile: currentName,
+                }));
+              }
+            }, 500);
+            
+            try {
+              extractedText = await invoke<string>('extract_document_text', { filePath });
+            } finally {
+              extractionDone = true;
+              clearInterval(heartbeatInterval);
+            }
+            
+            const fileName = filePath.split('/').pop() || filePath.split('\\').pop() || '';
+            documentName = fileName.includes('.')
+              ? fileName.substring(0, fileName.lastIndexOf('.'))
+              : fileName;
+          }
 
           // Create new activity
           let newActivityId;
@@ -560,6 +766,7 @@ const ProjectSelector: FC<{
           }
 
           if (newActivityId && extractedText) {
+            updateImportUi("saving", "Saving note and metadata", isAudioImport ? 0.95 : 0.85);
             // Update activity name and content
             await onUpdateActivityName(newActivityId, documentName);
 
@@ -569,20 +776,46 @@ const ProjectSelector: FC<{
               text: extractedText
             });
 
+            if (diarizationJson) {
+              await invoke("update_project_activity_transcript_workspace_data", {
+                activityId: newActivityId,
+                rawSegmentsJson: diarizationJson,
+                polishedText,
+                diarizationModel,
+                synthesisModel,
+                sourceLanguage: "original",
+                targetLanguage: polishTargetLanguage || settings.polish_target_language,
+                polishLanguageMode: polishLanguageMode || settings.polish_language_mode,
+              });
+            }
+
             // Vectorize chunks (if enabled)
             invoke("vectorize_document_chunks", { documentId: newActivityId })
               .catch(e => console.log('Vectorization skipped:', e));
 
+            if (isAudioImport && !polishApplied) {
+              toast({
+                title: "Imported with raw transcript",
+                description: "Diarization saved, but polish was unavailable for this file.",
+                status: "warning",
+                duration: 3500,
+                isClosable: true,
+              });
+            }
+
             lastActivityId = newActivityId;
             successCount++;
           }
+
+          completedImportsRef.current += 1;
+          updateImportUi("completed-file", "File completed", 1.0);
         } catch (error) {
           console.error(`Error importing ${filePath}:`, error);
+          failedImports.push(`${filePath}: ${String(error)}`);
+          completedImportsRef.current += 1;
+          updateImportUi("failed-file", "File failed", 1.0);
         }
       }
-
-      // Close loading toast
-      toast.close(loadingToast);
 
       if (successCount > 0) {
         // Select the last imported document
@@ -599,10 +832,20 @@ const ProjectSelector: FC<{
           duration: 3000,
           isClosable: true,
         });
+
+        if (failedImports.length > 0) {
+          toast({
+            title: "Some files failed to import",
+            description: failedImports[0],
+            status: "warning",
+            duration: 7000,
+            isClosable: true,
+          });
+        }
       } else {
         toast({
           title: "Import failed",
-          description: "Failed to import documents. Please try again.",
+          description: failedImports[0] || "Failed to import documents. Please try again.",
           status: "error",
           duration: 5000,
           isClosable: true,
@@ -617,6 +860,27 @@ const ProjectSelector: FC<{
         duration: 3000,
         isClosable: true,
       });
+    } finally {
+      if (unlistenProgress) {
+        unlistenProgress();
+      }
+      setTimeout(() => {
+        setImportUi({
+          active: false,
+          stage: "",
+          detail: "",
+          currentFile: "",
+          percent: 0,
+          completed: 0,
+          total: 0,
+          etaSeconds: null,
+        });
+      }, 800);
+      importStartRef.current = null;
+      lastEtaRef.current = null;
+      currentImportFileRef.current = "";
+      completedImportsRef.current = 0;
+      totalImportsRef.current = 0;
     }
   };
 
@@ -625,6 +889,56 @@ const ProjectSelector: FC<{
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const formatEta = (seconds: number | null) => {
+    if (seconds === null || seconds < 0) return "--";
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, "0")}`;
+  };
+
+  const formatElapsed = (startTime: number | null) => {
+    if (!startTime) return "0:00";
+    const elapsed = Math.floor((Date.now() - startTime) / 1000);
+    const mins = Math.floor(elapsed / 60);
+    const secs = elapsed % 60;
+    return `${mins}:${secs.toString().padStart(2, "0")}`;
+  };
+
+  const updateImportUi = (stage: string, detail: string, fileProgress: number) => {
+    const total = Math.max(1, totalImportsRef.current);
+    const completed = completedImportsRef.current;
+    const overall = Math.min(1, Math.max(0, (completed + fileProgress) / total));
+    const elapsed = importStartRef.current ? (Date.now() - importStartRef.current) / 1000 : 0;
+
+    // Smoothed ETA: only allows decreasing or small +5s drift per update
+    let etaSeconds: number | null = null;
+    if (overall > 0.05 && elapsed > 1) {
+      const rawEta = Math.max(0, Math.round((elapsed / overall) - elapsed));
+      const prev = lastEtaRef.current;
+      if (prev === null) {
+        etaSeconds = rawEta;
+      } else {
+        etaSeconds = Math.min(prev + 5, rawEta);
+      }
+      lastEtaRef.current = etaSeconds;
+    }
+
+    const currentName = currentImportFileRef.current.split('/').pop()
+      || currentImportFileRef.current.split('\\').pop()
+      || currentImportFileRef.current;
+
+    setImportUi({
+      active: true,
+      stage,
+      detail,
+      currentFile: currentName,
+      percent: Math.round(overall * 100),
+      completed,
+      total,
+      etaSeconds,
+    });
   };
 
   // Start voice recording
@@ -663,12 +977,32 @@ const ProjectSelector: FC<{
           }
         }
         await invoke('init_whisper_model');
+
+        if (settings.use_diarization) {
+          const diarizationReady = await invoke<boolean>('check_diarization_model');
+          if (!diarizationReady) {
+            setIsDownloadingModel(true);
+            setDownloadProgress(0);
+            const progressUnlisten = await listen<{ percent: number }>("diarization-download-progress", (event) => {
+              setDownloadProgress(event.payload.percent);
+            });
+            try {
+              await invoke('download_diarization_model');
+            } finally {
+              progressUnlisten();
+              setIsDownloadingModel(false);
+            }
+          }
+          await invoke('init_diarization_model');
+        }
       }
 
       // Reset audio state
       setRecordingFilePath(null);
       setRecordingTime(0);
       setLiveTranscript("");
+      setLiveSegments([]);
+      finalSegmentsRef.current = [];
 
       // Start recording via Tauri
       const result = await invoke<string>('start_audio_recording', { useLocal });
@@ -679,8 +1013,25 @@ const ProjectSelector: FC<{
 
       // Listen for live transcript updates in local mode
       if (useLocal) {
-        const unlisten = await listen<{ text: string; is_final: boolean }>("transcript-update", (event) => {
+        const unlisten = await listen<{ text: string; chunk_text?: string; speaker_id?: number; start_ms?: number; end_ms?: number; segments?: DiarizedSegment[]; is_final: boolean }>("transcript-update", (event) => {
           setLiveTranscript(event.payload.text);
+          if (event.payload.is_final && event.payload.segments) {
+            finalSegmentsRef.current = event.payload.segments;
+            setLiveSegments(event.payload.segments);
+            return;
+          }
+
+          if (event.payload.speaker_id && event.payload.chunk_text) {
+            setLiveSegments((prev) => [
+              ...prev,
+              {
+                speaker_id: event.payload.speaker_id!,
+                text: event.payload.chunk_text!,
+                start_ms: event.payload.start_ms ?? null,
+                end_ms: event.payload.end_ms ?? null,
+              },
+            ]);
+          }
         });
         transcriptUnlistenRef.current = unlisten;
       }
@@ -727,13 +1078,9 @@ const ProjectSelector: FC<{
         recordingStartTime.current = null;
       }
 
-      // Cleanup transcript listener
-      if (transcriptUnlistenRef.current) {
-        transcriptUnlistenRef.current();
-        transcriptUnlistenRef.current = null;
-      }
-
       let transcription: string;
+      let textToSave: string;
+      let polishedTextForWorkspace: string | null = null;
 
       if (useLocal) {
         // Local mode: stop returns the final transcript directly
@@ -747,6 +1094,33 @@ const ProjectSelector: FC<{
         console.log("Recording stopped, file path:", filePath);
 
         transcription = await invoke<string>('transcribe_audio', { filePath });
+      }
+
+      textToSave = transcription;
+
+      const shouldAutoPolishDiarized =
+        settings.use_local_transcription &&
+        settings.use_diarization;
+
+      if (shouldAutoPolishDiarized) {
+        const rawText = formatRawDiarizedTranscript(finalSegmentsRef.current, transcription);
+        try {
+          const polished = await invoke<string>('auto_polish_diarized_transcript', {
+            rawText,
+          });
+          polishedTextForWorkspace = polished;
+          textToSave = buildPolishedRawDocumentHtml(polished, rawText);
+        } catch (polishError) {
+          console.warn('Auto-polish failed, saving raw transcript:', polishError);
+          textToSave = buildRawOnlyDocumentHtml(rawText);
+          toast({
+            title: "Polish failed",
+            description: "Saved raw transcript only. You can retry polish manually.",
+            status: "warning",
+            duration: 4000,
+            isClosable: true,
+          });
+        }
       }
 
       // Create a new activity with the transcription
@@ -768,8 +1142,29 @@ const ProjectSelector: FC<{
         });
         await invoke("update_project_activity_text", {
           activityId: newActivityId,
-          text: transcription,
+          text: textToSave,
         });
+
+        if (settings.use_local_transcription && settings.use_diarization && finalSegmentsRef.current.length > 0) {
+          const synthesisModel = settings.api_choice === "openai"
+            ? `openai:${settings.model_openai || "gpt-5.4"}`
+            : settings.api_choice === "gemini"
+              ? `gemini:${settings.model_gemini || "gemini-3-pro-preview"}`
+              : settings.api_choice === "local"
+                ? "local:llama3.3:70b"
+                : `claude:${settings.model_claude || "claude-sonnet-4-6"}`;
+
+          await invoke("update_project_activity_transcript_workspace_data", {
+            activityId: newActivityId,
+            rawSegmentsJson: JSON.stringify(finalSegmentsRef.current),
+            polishedText: polishedTextForWorkspace,
+            diarizationModel: "local:streaming-diarizer-v1",
+            synthesisModel,
+            sourceLanguage: "original",
+            targetLanguage: settings.polish_target_language,
+            polishLanguageMode: settings.polish_language_mode,
+          });
+        }
 
         // Refresh state so sidebar shows the correct name
         onRefreshProjects();
@@ -780,6 +1175,8 @@ const ProjectSelector: FC<{
         setRecordingFilePath(null);
         setRecordingTime(0);
         setLiveTranscript("");
+        setLiveSegments([]);
+        finalSegmentsRef.current = [];
 
         toast({
           title: "Transcription complete",
@@ -803,6 +1200,10 @@ const ProjectSelector: FC<{
         isClosable: true,
       });
     } finally {
+      if (transcriptUnlistenRef.current) {
+        transcriptUnlistenRef.current();
+        transcriptUnlistenRef.current = null;
+      }
       setIsProcessingRecording(false);
       setIsTranscribing(false);
       setRecordingTime(0);
@@ -820,6 +1221,15 @@ const ProjectSelector: FC<{
     });
     return () => { unlisten.then((f) => f()); };
   }, [isRecording]);
+
+  // Tick elapsed time display every second during import
+  useEffect(() => {
+    if (!importUi.active) return;
+    const interval = setInterval(() => {
+      setElapsedTicker(t => t + 1);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [importUi.active]);
 
   // Handle paste events to create new documents from clipboard content
   const handlePaste = async (e: React.ClipboardEvent) => {
@@ -1106,6 +1516,37 @@ const ProjectSelector: FC<{
     onDeleteActivity(document.id);
   };
 
+  const handleRediarizeDocument = async (e: React.MouseEvent, document: ActivityDocument) => {
+    e.stopPropagation();
+    try {
+      setIsRediarizingId(document.id);
+      const segments = await invoke<DiarizedSegment[]>("rediarize_existing_recording", {
+        activityId: document.id,
+      });
+
+      onRefreshProjects();
+      onSelectActivity(document.id);
+
+      toast({
+        title: "Diarization refreshed",
+        description: `Created ${segments.length} speaker segments`,
+        status: "success",
+        duration: 3000,
+        isClosable: true,
+      });
+    } catch (error) {
+      toast({
+        title: "Diarization failed",
+        description: String(error),
+        status: "error",
+        duration: 5000,
+        isClosable: true,
+      });
+    } finally {
+      setIsRediarizingId(null);
+    }
+  };
+
   return (
     <Flex direction="column" w="full" gap={4} overflow="hidden" h="full">
       <Flex gap={2} w="full" align="center">
@@ -1201,6 +1642,59 @@ const ProjectSelector: FC<{
 
       {/* Document list section */}
       <Flex direction="column" w="full" flex={1} minH={0}>
+        {importUi.active && (
+          <Box mb={3} p={3} bg="blue.50" border="1px solid" borderColor="blue.100" borderRadius="md">
+            {(() => {
+              const totalSegments = IMPORT_PHASES.length;
+              const overallProgress = Math.min(1, Math.max(0, importUi.percent / 100));
+              return (
+                <>
+                  <Flex gap="2px" mb={2}>
+                    {IMPORT_PHASES.map((phase, index) => {
+                      const fill = getSegmentFill(overallProgress, index, totalSegments);
+                      const textColor = fill > 0.45 ? "white" : "blue.800";
+                      const clipPath =
+                        index === 0
+                          ? "polygon(0 0, calc(100% - 14px) 0, 100% 50%, calc(100% - 14px) 100%, 0 100%)"
+                          : index === totalSegments - 1
+                            ? "polygon(14px 0, 100% 0, 100% 100%, 14px 100%, 0 50%)"
+                            : "polygon(14px 0, calc(100% - 14px) 0, 100% 50%, calc(100% - 14px) 100%, 14px 100%, 0 50%)";
+
+                      return (
+                        <Box
+                          key={phase.label}
+                          flex={1}
+                          h="44px"
+                          display="flex"
+                          alignItems="center"
+                          justifyContent="center"
+                          sx={{
+                            clipPath,
+                            background: `linear-gradient(90deg, #0E6A8A 0%, #0E6A8A ${fill * 100}%, #CFE8F1 ${fill * 100}%, #CFE8F1 100%)`,
+                          }}
+                        >
+                          <ChakraText fontSize="lg" fontWeight="700" color={textColor}>
+                            {index + 1}
+                          </ChakraText>
+                        </Box>
+                      );
+                    })}
+                  </Flex>
+
+                  <Flex justify="space-between" align="center">
+                    <ChakraText fontSize="xs" color="blue.800" maxW="78%" isTruncated>
+                      {importUi.currentFile || ""}
+                    </ChakraText>
+                    <ChakraText fontSize="xs" color="blue.700">
+                      {importUi.etaSeconds === null ? "Stima in corso" : `Mancano ~${formatEta(importUi.etaSeconds)}`}
+                    </ChakraText>
+                  </Flex>
+                </>
+              );
+            })()}
+          </Box>
+        )}
+
         <Flex justify="space-between" align="center" mb={3}>
           <Text type="m" bold>
             {selectedProject ? `${selectedProject.name} Notes` : "All Notes"}
@@ -1231,7 +1725,7 @@ const ProjectSelector: FC<{
               </Tooltip>
               <MenuList>
                 <MenuItem icon={<FileUp size={14} />} onClick={handleFileImport}>
-                  Import file… <ChakraText as="span" color="gray.500" fontSize="xs" ml={2}>PDF, DOCX, TXT, MD</ChakraText>
+                  Import file… <ChakraText as="span" color="gray.500" fontSize="xs" ml={2}>PDF, DOCX, TXT, MD, OGG, WAV, MP3</ChakraText>
                 </MenuItem>
                 <MenuItem icon={<LinkIcon size={14} />} onClick={() => setIsUrlModalOpen(true)}>
                   Import from URL…
@@ -1363,6 +1857,13 @@ const ProjectSelector: FC<{
                         />
                         <MenuList minW="120px">
                           <MenuItem
+                            icon={<RefreshCcw size={14} />}
+                            isDisabled={isRediarizingId === document.id}
+                            onClick={(e: React.MouseEvent) => handleRediarizeDocument(e, document)}
+                          >
+                            {isRediarizingId === document.id ? "Re-diarizing..." : "Redo diarization"}
+                          </MenuItem>
+                          <MenuItem
                             icon={<Edit size={14} />}
                             onClick={(e: React.MouseEvent) => {
                               e.stopPropagation();
@@ -1456,9 +1957,20 @@ const ProjectSelector: FC<{
             </Flex>
             {settings.use_local_transcription && liveTranscript && (
               <Box mt={2} px={3} py={2} bg="gray.50" borderRadius="md" maxH="100px" overflowY="auto">
-                <ChakraText fontSize="xs" color="gray.600" fontStyle="italic">
-                  {liveTranscript}
-                </ChakraText>
+                {settings.use_diarization && liveSegments.length > 0 ? (
+                  liveSegments.slice(-10).map((segment, idx) => (
+                    <ChakraText key={`${segment.speaker_id}-${idx}`} fontSize="xs" color="gray.600" mb={1}>
+                      <ChakraText as="span" fontWeight="700" color={speakerColor(segment.speaker_id)}>
+                        Speaker {segment.speaker_id}:
+                      </ChakraText>{" "}
+                      {segment.text}
+                    </ChakraText>
+                  ))
+                ) : (
+                  <ChakraText fontSize="xs" color="gray.600" fontStyle="italic">
+                    {liveTranscript}
+                  </ChakraText>
+                )}
               </Box>
             )}
           </Box>

@@ -2,7 +2,7 @@ import { type FC, useState, useEffect, useRef, useCallback } from "react";
 import React from "react";
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
-import TextStyle from '@tiptap/extension-text-style';
+import { TextStyle } from '@tiptap/extension-text-style';
 import FontFamily from '@tiptap/extension-font-family';
 import Placeholder from '@tiptap/extension-placeholder';
 import {
@@ -23,8 +23,20 @@ import {
   InputGroup,
   InputLeftElement,
   Spinner,
+  Tabs,
+  TabList,
+  TabPanels,
+  TabPanel,
+  Tab,
+  Badge,
+  Table,
+  Thead,
+  Tbody,
+  Tr,
+  Th,
+  Td,
 } from '@chakra-ui/react';
-import { Bold, Italic, List, Undo, Redo, FolderInput, Search, Sparkles, Mic, Square, NotebookPen, Presentation, Wand2, Headphones } from "lucide-react";
+import { Bold, Italic, List, Undo, Redo, FolderInput, Search, Sparkles, Mic, Square, NotebookPen, Presentation, Wand2, Headphones, RefreshCcw } from "lucide-react";
 import { SlideGeneratorModal } from "./SlideGeneratorModal";
 import { PodcastGeneratorModal, type PodcastGenerationParams } from "./PodcastGeneratorModal";
 import { PodcastPlayerModal, type PodcastResult } from "./PodcastPlayerModal";
@@ -42,6 +54,46 @@ type TipTapEditorProps = {
   documentId: number;
   onSave: (content: string, title: string, documentId: number) => void;
 };
+
+type DiarizedSegment = {
+  speaker_id: number;
+  text: string;
+  start_ms?: number | null;
+  end_ms?: number | null;
+  language?: string | null;
+};
+
+type TranscriptWorkspaceSegment = {
+  speaker_id: number;
+  start_ms: number | null;
+  end_ms: number | null;
+  text: string;
+  original_text: string | null;
+  language: string | null;
+};
+
+type TranscriptWorkspaceResponse = {
+  has_workspace: boolean;
+  raw_segments: TranscriptWorkspaceSegment[];
+  polished_text: string;
+  diarization_model: string;
+  synthesis_model: string;
+  source_language: string;
+  target_language: string;
+  polish_language_mode: string;
+};
+
+const SPEAKER_COLORS = ["teal.600", "purple.600", "orange.600", "blue.600", "pink.600", "green.600"];
+
+const speakerColor = (speakerId: number) => SPEAKER_COLORS[(speakerId - 1) % SPEAKER_COLORS.length] || "teal.600";
+
+const escapeHtml = (value: string) =>
+  value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
 
 export const TipTapEditor: FC<TipTapEditorProps> = React.memo(({
   content,
@@ -71,11 +123,16 @@ export const TipTapEditor: FC<TipTapEditorProps> = React.memo(({
   const [recordingTime, setRecordingTime] = useState(0);
   const [recordingFilePath, setRecordingFilePath] = useState<string | null>(null);
   const [liveTranscript, setLiveTranscript] = useState("");
+  const [liveSegments, setLiveSegments] = useState<DiarizedSegment[]>([]);
   const [isDownloadingModel, setIsDownloadingModel] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(0);
+  const [workspaceLoading, setWorkspaceLoading] = useState(false);
+  const [regeneratingPolished, setRegeneratingPolished] = useState(false);
+  const [transcriptWorkspace, setTranscriptWorkspace] = useState<TranscriptWorkspaceResponse | null>(null);
   const recordingStartTimeRef = useRef<number | null>(null);
   const recordingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const transcriptUnlistenRef = useRef<(() => void) | null>(null);
+  const finalSegmentsRef = useRef<DiarizedSegment[]>([]);
 
   const titleInputRef = useRef<HTMLInputElement>(null);
   const toast = useToast();
@@ -244,6 +301,72 @@ export const TipTapEditor: FC<TipTapEditorProps> = React.memo(({
     }
   }, [documentId]);
 
+  useEffect(() => {
+    let isMounted = true;
+    const loadWorkspace = async () => {
+      setWorkspaceLoading(true);
+      try {
+        const workspace = await invoke<TranscriptWorkspaceResponse>(
+          "get_project_activity_transcript_workspace",
+          { activityId: documentId },
+        );
+        if (!isMounted) return;
+        setTranscriptWorkspace(workspace.has_workspace ? workspace : null);
+      } catch (error) {
+        if (!isMounted) return;
+        console.warn("No transcript workspace for this note:", error);
+        setTranscriptWorkspace(null);
+      } finally {
+        if (isMounted) {
+          setWorkspaceLoading(false);
+        }
+      }
+    };
+
+    loadWorkspace();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [documentId]);
+
+  const handleRegeneratePolished = async () => {
+    setRegeneratingPolished(true);
+    try {
+      const polished = await invoke<string>("regenerate_project_activity_polished_transcript", {
+        activityId: documentId,
+      });
+
+      setTranscriptWorkspace((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          polished_text: polished,
+        };
+      });
+
+      toast({
+        title: "Polished summary regenerated",
+        status: "success",
+        duration: 2000,
+        isClosable: true,
+        position: "bottom-right",
+      });
+    } catch (error: any) {
+      console.error("Failed to regenerate polished summary:", error);
+      toast({
+        title: "Regeneration failed",
+        description: error?.toString() || "Unexpected error while regenerating summary.",
+        status: "error",
+        duration: 5000,
+        isClosable: true,
+        position: "bottom-right",
+      });
+    } finally {
+      setRegeneratingPolished(false);
+    }
+  };
+
 
   const handleTitleChange = (newTitle: string) => {
     setDocumentTitle(newTitle);
@@ -298,11 +421,31 @@ export const TipTapEditor: FC<TipTapEditorProps> = React.memo(({
         }
       }
       await invoke('init_whisper_model');
+
+      if (settings.use_diarization) {
+        const diarizationReady = await invoke<boolean>('check_diarization_model');
+        if (!diarizationReady) {
+          setIsDownloadingModel(true);
+          setDownloadProgress(0);
+          const progressUnlisten = await listen<{ percent: number }>("diarization-download-progress", (event) => {
+            setDownloadProgress(event.payload.percent);
+          });
+          try {
+            await invoke('download_diarization_model');
+          } finally {
+            progressUnlisten();
+            setIsDownloadingModel(false);
+          }
+        }
+        await invoke('init_diarization_model');
+      }
     }
 
     setRecordingFilePath(null);
     setRecordingTime(0);
     setLiveTranscript("");
+    setLiveSegments([]);
+    finalSegmentsRef.current = [];
 
     try {
       const result = await invoke<string>('start_audio_recording', { useLocal });
@@ -312,8 +455,25 @@ export const TipTapEditor: FC<TipTapEditorProps> = React.memo(({
 
       // Listen for live transcript updates in local mode
       if (useLocal) {
-        const unlisten = await listen<{ text: string; is_final: boolean }>("transcript-update", (event) => {
+        const unlisten = await listen<{ text: string; chunk_text?: string; speaker_id?: number; start_ms?: number; end_ms?: number; segments?: DiarizedSegment[]; is_final: boolean }>("transcript-update", (event) => {
           setLiveTranscript(event.payload.text);
+          if (event.payload.is_final && event.payload.segments) {
+            finalSegmentsRef.current = event.payload.segments;
+            setLiveSegments(event.payload.segments);
+            return;
+          }
+
+          if (event.payload.speaker_id && event.payload.chunk_text) {
+            setLiveSegments((prev) => [
+              ...prev,
+              {
+                speaker_id: event.payload.speaker_id!,
+                text: event.payload.chunk_text!,
+                start_ms: event.payload.start_ms ?? null,
+                end_ms: event.payload.end_ms ?? null,
+              },
+            ]);
+          }
         });
         transcriptUnlistenRef.current = unlisten;
       }
@@ -341,12 +501,6 @@ export const TipTapEditor: FC<TipTapEditorProps> = React.memo(({
     if (recordingTimerRef.current) { clearInterval(recordingTimerRef.current); recordingTimerRef.current = null; }
     recordingStartTimeRef.current = null;
 
-    // Cleanup transcript listener
-    if (transcriptUnlistenRef.current) {
-      transcriptUnlistenRef.current();
-      transcriptUnlistenRef.current = null;
-    }
-
     try {
       let transcription: string;
 
@@ -367,7 +521,19 @@ export const TipTapEditor: FC<TipTapEditorProps> = React.memo(({
         const separator = editor.getHTML() && editor.getHTML() !== '<p></p>'
           ? '<hr/><p><em>Voice note:</em></p>'
           : '<p><em>Voice note:</em></p>';
-        editor.commands.insertContentAt(editor.state.doc.content.size - 1, separator + `<p>${transcription}</p>`);
+
+        const hasDiarization = settings.use_local_transcription
+          && settings.use_diarization
+          && finalSegmentsRef.current.length > 0;
+        const diarizedHtml = hasDiarization
+          ? finalSegmentsRef.current
+              .map((segment) => {
+                const color = speakerColor(segment.speaker_id);
+                return `<p><strong style="color:${color}">Speaker ${segment.speaker_id}:</strong> ${escapeHtml(segment.text)}</p>`;
+              })
+              .join("")
+          : `<p>${escapeHtml(transcription)}</p>`;
+        editor.commands.insertContentAt(editor.state.doc.content.size - 1, separator + diarizedHtml);
 
         // Trigger auto-save
         latestContentRef.current = editor.getHTML();
@@ -381,11 +547,17 @@ export const TipTapEditor: FC<TipTapEditorProps> = React.memo(({
       console.error("Recording/transcription failed:", error);
       toast({ title: "Transcription failed", description: String(error), status: "error", duration: 5000, isClosable: true, position: "bottom-right" });
     } finally {
+      if (transcriptUnlistenRef.current) {
+        transcriptUnlistenRef.current();
+        transcriptUnlistenRef.current = null;
+      }
       setIsTranscribing(false);
       setIsProcessingRecording(false);
       setRecordingFilePath(null);
       setRecordingTime(0);
       setLiveTranscript("");
+      setLiveSegments([]);
+      finalSegmentsRef.current = [];
     }
   };
 
@@ -394,6 +566,26 @@ export const TipTapEditor: FC<TipTapEditorProps> = React.memo(({
       editor.chain().focus().setFontFamily(fontFamily).run();
       setCurrentFont(fontFamily);
     }
+  };
+
+  const formatTimestamp = (startMs: number | null, endMs: number | null) => {
+    if (startMs === null && endMs === null) return "N/A";
+    const formatOne = (value: number | null) => {
+      if (value === null) return "--:--";
+      const totalSeconds = Math.floor(value / 1000);
+      const hours = Math.floor(totalSeconds / 3600);
+      const mins = Math.floor((totalSeconds % 3600) / 60);
+      const secs = totalSeconds % 60;
+      if (hours > 0) {
+        return `${hours.toString().padStart(2, "0")}:${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+      }
+      return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+    };
+
+    if (startMs !== null && endMs !== null) {
+      return `${formatOne(startMs)} - ${formatOne(endMs)}`;
+    }
+    return formatOne(startMs ?? endMs);
   };
 
   // Clear search when menu closes
@@ -830,93 +1022,181 @@ export const TipTapEditor: FC<TipTapEditorProps> = React.memo(({
               
             </Flex>
           </Flex>
-            <HStack mb={4} spacing={2} alignItems="center" flexWrap="wrap">
-              <IconButton
-                aria-label="Bold"
-                icon={<Bold size={16} />}
-                onClick={() => editor?.chain().focus().toggleBold().run()}
-                isActive={editor?.isActive('bold')}
-                variant={editor?.isActive('bold') ? 'solid' : 'outline'}
-                size="sm"
-              />
-              <IconButton
-                aria-label="Italic"
-                icon={<Italic size={16} />}
-                onClick={() => editor?.chain().focus().toggleItalic().run()}
-                isActive={editor?.isActive('italic')}
-                variant={editor?.isActive('italic') ? 'solid' : 'outline'}
-                size="sm"
-              />
-              <IconButton
-                aria-label="Bullet List"
-                icon={<List size={16} />}
-                onClick={() => editor?.chain().focus().toggleBulletList().run()}
-                isActive={editor?.isActive('bulletList')}
-                variant={editor?.isActive('bulletList') ? 'solid' : 'outline'}
-                size="sm"
-              />
-              <IconButton
-                aria-label="Undo"
-                icon={<Undo size={16} />}
-                onClick={() => editor?.chain().focus().undo().run()}
-                isDisabled={!editor?.can().undo()}
-                size="sm"
-              />
-              <IconButton
-                aria-label="Redo"
-                icon={<Redo size={16} />}
-                onClick={() => editor?.chain().focus().redo().run()}
-                isDisabled={!editor?.can().redo()}
-                size="sm"
-              />
-              
-              {/* Font Family Dropdown */}
-              <Select 
-                size="sm"
-                value={currentFont}
-                onChange={(e) => handleFontChange(e.target.value)}
-                width="auto"
-                ml={2}
-              >
-                {fonts.map((font) => (
-                  <option 
-                    key={font.value} 
-                    value={font.value}
-                    style={{ fontFamily: font.value }}
-                  >
-                    {font.name}
-                  </option>
-                ))}
-              </Select>
-            </HStack>
+          {!transcriptWorkspace && (
+            <>
+              <HStack mb={4} spacing={2} alignItems="center" flexWrap="wrap">
+                <IconButton
+                  aria-label="Bold"
+                  icon={<Bold size={16} />}
+                  onClick={() => editor?.chain().focus().toggleBold().run()}
+                  isActive={editor?.isActive('bold')}
+                  variant={editor?.isActive('bold') ? 'solid' : 'outline'}
+                  size="sm"
+                />
+                <IconButton
+                  aria-label="Italic"
+                  icon={<Italic size={16} />}
+                  onClick={() => editor?.chain().focus().toggleItalic().run()}
+                  isActive={editor?.isActive('italic')}
+                  variant={editor?.isActive('italic') ? 'solid' : 'outline'}
+                  size="sm"
+                />
+                <IconButton
+                  aria-label="Bullet List"
+                  icon={<List size={16} />}
+                  onClick={() => editor?.chain().focus().toggleBulletList().run()}
+                  isActive={editor?.isActive('bulletList')}
+                  variant={editor?.isActive('bulletList') ? 'solid' : 'outline'}
+                  size="sm"
+                />
+                <IconButton
+                  aria-label="Undo"
+                  icon={<Undo size={16} />}
+                  onClick={() => editor?.chain().focus().undo().run()}
+                  isDisabled={!editor?.can().undo()}
+                  size="sm"
+                />
+                <IconButton
+                  aria-label="Redo"
+                  icon={<Redo size={16} />}
+                  onClick={() => editor?.chain().focus().redo().run()}
+                  isDisabled={!editor?.can().redo()}
+                  size="sm"
+                />
 
-          <Box
-            width="100%"
-            sx={{
-              ".ProseMirror": {
-                outline: "none",
-                width: "100%",
-                maxWidth: "none",
-                px: 3,
-              },
-              ".ProseMirror ul, .ProseMirror ol": {
-                paddingLeft: "1.5em",
-              },
-              ".ProseMirror p.is-editor-empty:first-of-type::before": {
-                content: "attr(data-placeholder)",
-                float: "left",
-                color: "var(--chakra-colors-gray-400)",
-                pointerEvents: "none",
-                height: 0,
-              },
-              minH: "400px",
-              py: 2,
-              fontSize: "var(--font-size-m)",
-              fontFamily: "var(--font-family-body)",
-            }}
-          >
-            <EditorContent editor={editor} style={{ width: '100%' }} />
-          </Box>
+                <Select
+                  size="sm"
+                  value={currentFont}
+                  onChange={(e) => handleFontChange(e.target.value)}
+                  width="auto"
+                  ml={2}
+                >
+                  {fonts.map((font) => (
+                    <option
+                      key={font.value}
+                      value={font.value}
+                      style={{ fontFamily: font.value }}
+                    >
+                      {font.name}
+                    </option>
+                  ))}
+                </Select>
+              </HStack>
+
+              <Box
+                width="100%"
+                sx={{
+                  ".ProseMirror": {
+                    outline: "none",
+                    width: "100%",
+                    maxWidth: "none",
+                    px: 3,
+                  },
+                  ".ProseMirror ul, .ProseMirror ol": {
+                    paddingLeft: "1.5em",
+                  },
+                  ".ProseMirror p.is-editor-empty:first-of-type::before": {
+                    content: "attr(data-placeholder)",
+                    float: "left",
+                    color: "var(--chakra-colors-gray-400)",
+                    pointerEvents: "none",
+                    height: 0,
+                  },
+                  minH: "400px",
+                  py: 2,
+                  fontSize: "var(--font-size-m)",
+                  fontFamily: "var(--font-family-body)",
+                }}
+              >
+                <EditorContent editor={editor} style={{ width: '100%' }} />
+              </Box>
+            </>
+          )}
+
+          {workspaceLoading && (
+            <Flex align="center" gap={2} py={4}>
+              <Spinner size="sm" />
+              <Text fontSize="sm" color="gray.600">Loading transcript workspace...</Text>
+            </Flex>
+          )}
+
+          {!workspaceLoading && transcriptWorkspace && (
+            <Tabs variant="enclosed" colorScheme="teal" mt={2}>
+              <TabList>
+                <Tab>Raw Transcript</Tab>
+                <Tab>Polished Summary</Tab>
+              </TabList>
+              <TabPanels>
+                <TabPanel px={0}>
+                  <Flex justify="space-between" align="center" mb={3}>
+                    <HStack spacing={2}>
+                      <Badge colorScheme="orange">Original language</Badge>
+                      <Badge colorScheme="purple">Diarization model: {transcriptWorkspace.diarization_model || "unknown"}</Badge>
+                    </HStack>
+                    <Text fontSize="xs" color="gray.600">Source language: {transcriptWorkspace.source_language || "unknown"}</Text>
+                  </Flex>
+
+                  <Box borderWidth="1px" borderColor="gray.200" borderRadius="md" overflowX="auto">
+                    <Table size="sm">
+                      <Thead bg="gray.50">
+                        <Tr>
+                          <Th>Timestamp</Th>
+                          <Th>Speaker</Th>
+                          <Th>Original utterance</Th>
+                          <Th>Language</Th>
+                        </Tr>
+                      </Thead>
+                      <Tbody>
+                        {transcriptWorkspace.raw_segments.map((segment, index) => (
+                          <Tr key={`${segment.speaker_id}-${index}`}>
+                            <Td fontSize="xs" whiteSpace="nowrap">{formatTimestamp(segment.start_ms, segment.end_ms)}</Td>
+                            <Td>
+                              <Text as="span" fontWeight="700" color={speakerColor(segment.speaker_id)}>
+                                Speaker {segment.speaker_id}
+                              </Text>
+                            </Td>
+                            <Td>{segment.original_text || segment.text}</Td>
+                            <Td fontSize="xs" color="gray.600">{segment.language || transcriptWorkspace.source_language || "original"}</Td>
+                          </Tr>
+                        ))}
+                      </Tbody>
+                    </Table>
+                  </Box>
+                </TabPanel>
+
+                <TabPanel px={0}>
+                  <Flex justify="space-between" align="center" mb={3}>
+                    <HStack spacing={2}>
+                      <Badge colorScheme="teal">Synthesis model: {transcriptWorkspace.synthesis_model || "unknown"}</Badge>
+                      <Badge colorScheme="blue">Mode: {transcriptWorkspace.polish_language_mode || "keep_original"}</Badge>
+                      <Badge colorScheme="cyan">Target: {transcriptWorkspace.target_language || "same as source"}</Badge>
+                    </HStack>
+                    <Button
+                      size="sm"
+                      leftIcon={regeneratingPolished ? undefined : <RefreshCcw size={14} />}
+                      onClick={handleRegeneratePolished}
+                      isLoading={regeneratingPolished}
+                      loadingText="Regenerating"
+                      colorScheme="teal"
+                      variant="outline"
+                    >
+                      Regenerate polished
+                    </Button>
+                  </Flex>
+
+                  <Box borderWidth="1px" borderColor="gray.200" borderRadius="md" p={4} minH="260px" bg="white">
+                    {transcriptWorkspace.polished_text.trim() ? (
+                      <Text whiteSpace="pre-wrap" color="gray.800">{transcriptWorkspace.polished_text}</Text>
+                    ) : (
+                      <Text color="gray.500" fontStyle="italic">
+                        Polished summary not available yet. Use Regenerate polished to create one.
+                      </Text>
+                    )}
+                  </Box>
+                </TabPanel>
+              </TabPanels>
+            </Tabs>
+          )}
 
           {/* Model download progress */}
           {isDownloadingModel && (
@@ -972,9 +1252,20 @@ export const TipTapEditor: FC<TipTapEditorProps> = React.memo(({
               </Flex>
               {settings.use_local_transcription && liveTranscript && isRecording && (
                 <Box mt={1} px={3} py={2} bg="gray.50" borderRadius="md" maxH="80px" overflowY="auto">
-                  <Text fontSize="xs" color="gray.600" fontStyle="italic">
-                    {liveTranscript}
-                  </Text>
+                  {settings.use_diarization && liveSegments.length > 0 ? (
+                    liveSegments.slice(-8).map((segment, idx) => (
+                      <Text key={`${segment.speaker_id}-${idx}`} fontSize="xs" color="gray.600" mb={1}>
+                        <Text as="span" fontWeight="700" color={speakerColor(segment.speaker_id)}>
+                          Speaker {segment.speaker_id}:
+                        </Text>{" "}
+                        {segment.text}
+                      </Text>
+                    ))
+                  ) : (
+                    <Text fontSize="xs" color="gray.600" fontStyle="italic">
+                      {liveTranscript}
+                    </Text>
+                  )}
                 </Box>
               )}
             </Box>

@@ -5,6 +5,8 @@ import {
   type PropsWithChildren,
   useState,
   useEffect,
+  useMemo,
+  useCallback,
 } from "react";
 import { invoke } from "@tauri-apps/api";
 import { enable, disable, isEnabled } from "tauri-plugin-autostart-api";
@@ -25,6 +27,7 @@ export const DEFAULT_SETTINGS: Settings = {
   api_choice: "claude",
   api_key_claude: "",
   api_key_open_ai: "",
+  openai_api_base: "",
   api_key_gemini: "",
   local_model_url: "http://localhost:11434",
   vectorization_enabled: false,
@@ -35,12 +38,16 @@ export const DEFAULT_SETTINGS: Settings = {
   model_gemini: "",
   use_local_transcription: true,
   whisper_model: "large-v3",
+  use_diarization: false,
+  max_speakers: 6,
+  polish_language_mode: "keep_original",
+  polish_target_language: "Italian",
   api_key_elevenlabs: "",
+  embed_api_base: "",
+  embed_model: "",
 };
 
-type Update = {
-  (settings: Settings): Promise<void>;
-};
+type Update = (settings: Settings) => Promise<void>;
 
 type ApiChoice = "claude" | "openai" | "gemini" | "local";
 export type Settings = {
@@ -50,6 +57,7 @@ export type Settings = {
   api_choice: ApiChoice;
   api_key_claude: string;
   api_key_open_ai: string;
+  openai_api_base: string;
   api_key_gemini: string;
   local_model_url: string;
   vectorization_enabled: boolean;
@@ -60,7 +68,13 @@ export type Settings = {
   model_gemini: string;
   use_local_transcription: boolean;
   whisper_model: string;
+  use_diarization: boolean;
+  max_speakers: number;
+  polish_language_mode: "keep_original" | "translate";
+  polish_target_language: string;
   api_key_elevenlabs: string;
+  embed_api_base: string;
+  embed_model: string;
 };
 
 type SettingsContextType = {
@@ -97,17 +111,24 @@ export const SettingsProvider: FC<PropsWithChildren> = ({ children }) => {
         (getSettingOrEmpty(response, "api_choice") as ApiChoice) || "claude",
       api_key_claude: getSettingOrEmpty(response, "api_key_claude") || "",
       api_key_open_ai: getSettingOrEmpty(response, "api_key_open_ai") || "",
+      openai_api_base: getSettingOrEmpty(response, "openai_api_base") || "",
       api_key_gemini: getSettingOrEmpty(response, "api_key_gemini") || "",
       local_model_url: getSettingOrEmpty(response, "local_model_url") || "http://localhost:11434",
       vectorization_enabled: getSettingOrEmpty(response, "vectorization_enabled") == "true",
-      rag_top_k: parseInt(getSettingOrEmpty(response, "rag_top_k")) || 20,
+      rag_top_k: Number.parseInt(getSettingOrEmpty(response, "rag_top_k"), 10) || 20,
       meeting_detection_enabled: getSettingOrEmpty(response, "meeting_detection_enabled") == "true",
       model_claude: getSettingOrEmpty(response, "model_claude") || "",
       model_openai: getSettingOrEmpty(response, "model_openai") || "",
       model_gemini: getSettingOrEmpty(response, "model_gemini") || "",
       use_local_transcription: getSettingOrEmpty(response, "use_local_transcription") !== "false",
       whisper_model: getSettingOrEmpty(response, "whisper_model") || "large-v3",
+      use_diarization: getSettingOrEmpty(response, "use_diarization") === "true",
+      max_speakers: Number.parseInt(getSettingOrEmpty(response, "max_speakers"), 10) || 6,
+      polish_language_mode: (getSettingOrEmpty(response, "polish_language_mode") as "keep_original" | "translate") || "keep_original",
+      polish_target_language: getSettingOrEmpty(response, "polish_target_language") || "Italian",
       api_key_elevenlabs: getSettingOrEmpty(response, "api_key_elevenlabs") || "",
+      embed_api_base: getSettingOrEmpty(response, "embed_api_base") || "",
+      embed_model: getSettingOrEmpty(response, "embed_model") || "",
     };
   };
 
@@ -127,7 +148,7 @@ export const SettingsProvider: FC<PropsWithChildren> = ({ children }) => {
     });
   }, []);
 
-  const update: Update = async (newSettings) => {
+  const update: Update = useCallback(async (newSettings) => {
     if (newSettings.auto_start !== settings.auto_start) {
       if (newSettings.auto_start) {
         await enable();
@@ -137,11 +158,12 @@ export const SettingsProvider: FC<PropsWithChildren> = ({ children }) => {
     }
     updateSettingsOnRust(newSettings);
     setSettings(newSettings);
-    return Promise.resolve();
-  };
+  }, [settings]);
+
+  const contextValue = useMemo(() => ({ settings, update }), [settings, update]);
 
   return (
-    <SettingsContext.Provider value={{ settings, update }}>
+    <SettingsContext.Provider value={contextValue}>
       {children}
     </SettingsContext.Provider>
   );
@@ -154,7 +176,7 @@ const updateSettingsOnRust = (settings: Settings) => {
 export const useGlobalSettings = (): SettingsContextType => {
   const context = useContext(SettingsContext);
   if (context === undefined) {
-    throw Error("SettingsContext must be used within a SettingsProvider");
+    throw new Error("SettingsContext must be used within a SettingsProvider");
   }
   return context;
 };

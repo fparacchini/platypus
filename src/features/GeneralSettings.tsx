@@ -16,6 +16,7 @@ type LocalSettings = {
   autoStart: boolean;
   apiChoice: "claude" | "openai" | "gemini" | "local";
   apiKeyOpenAi: string;
+  openAiApiBase: string;
   apiKeyClaude: string;
   apiKeyGemini: string;
   localModelUrl: string;
@@ -27,6 +28,10 @@ type LocalSettings = {
   modelGemini: string;
   useLocalTranscription: boolean;
   whisperModel: string;
+  useDiarization: boolean;
+  maxSpeakers: number;
+  polishLanguageMode: "keep_original" | "translate";
+  polishTargetLanguage: string;
   apiKeyElevenlabs: string;
 };
 export const GeneralSettings = () => {
@@ -36,6 +41,7 @@ export const GeneralSettings = () => {
     autoStart: settings.auto_start,
     apiChoice: settings.api_choice,
     apiKeyOpenAi: settings.api_key_open_ai,
+    openAiApiBase: settings.openai_api_base,
     apiKeyClaude: settings.api_key_claude,
     apiKeyGemini: settings.api_key_gemini,
     localModelUrl: settings.local_model_url,
@@ -47,6 +53,10 @@ export const GeneralSettings = () => {
     modelGemini: settings.model_gemini,
     useLocalTranscription: settings.use_local_transcription,
     whisperModel: settings.whisper_model,
+    useDiarization: settings.use_diarization,
+    maxSpeakers: settings.max_speakers,
+    polishLanguageMode: settings.polish_language_mode,
+    polishTargetLanguage: settings.polish_target_language,
     apiKeyElevenlabs: settings.api_key_elevenlabs,
   });
 
@@ -55,6 +65,7 @@ export const GeneralSettings = () => {
       autoStart: settings.auto_start,
       apiChoice: settings.api_choice,
       apiKeyOpenAi: settings.api_key_open_ai,
+      openAiApiBase: settings.openai_api_base,
       apiKeyClaude: settings.api_key_claude,
       apiKeyGemini: settings.api_key_gemini,
       localModelUrl: settings.local_model_url,
@@ -66,6 +77,10 @@ export const GeneralSettings = () => {
       modelGemini: settings.model_gemini,
       useLocalTranscription: settings.use_local_transcription,
       whisperModel: settings.whisper_model,
+      useDiarization: settings.use_diarization,
+      maxSpeakers: settings.max_speakers,
+      polishLanguageMode: settings.polish_language_mode,
+      polishTargetLanguage: settings.polish_target_language,
       apiKeyElevenlabs: settings.api_key_elevenlabs,
     });
   }, [settings]);
@@ -139,6 +154,7 @@ export const GeneralSettings = () => {
       auto_start: localSettings.autoStart,
       api_choice: localSettings.apiChoice,
       api_key_open_ai: localSettings.apiKeyOpenAi,
+      openai_api_base: localSettings.openAiApiBase,
       api_key_claude: localSettings.apiKeyClaude,
       api_key_gemini: localSettings.apiKeyGemini,
       local_model_url: localSettings.localModelUrl,
@@ -150,13 +166,17 @@ export const GeneralSettings = () => {
       model_gemini: localSettings.modelGemini,
       use_local_transcription: localSettings.useLocalTranscription,
       whisper_model: localSettings.whisperModel,
+      use_diarization: localSettings.useDiarization,
+      max_speakers: Math.max(1, Math.min(12, localSettings.maxSpeakers || 6)),
+      polish_language_mode: localSettings.polishLanguageMode,
+      polish_target_language: localSettings.polishTargetLanguage.trim() || "Italian",
       api_key_elevenlabs: localSettings.apiKeyElevenlabs,
     });
     savedSuccessfullyToast();
   };
 
   const onChangeRagTopK = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const value = parseInt(event.target.value) || 20;
+    const value = Number.parseInt(event.target.value, 10) || 20;
     setLocalSettings((prevState) => ({
       ...prevState,
       ragTopK: Math.max(1, Math.min(50, value)), // Clamp between 1 and 50
@@ -181,6 +201,21 @@ export const GeneralSettings = () => {
     setLocalSettings((prevState) => ({
       ...prevState,
       useLocalTranscription: event.target.checked,
+    }));
+  };
+
+  const handleDiarizationChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    setLocalSettings((prevState) => ({
+      ...prevState,
+      useDiarization: event.target.checked,
+    }));
+  };
+
+  const handleMaxSpeakersChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const parsed = Number.parseInt(event.target.value, 10) || 6;
+    setLocalSettings((prevState) => ({
+      ...prevState,
+      maxSpeakers: Math.max(1, Math.min(12, parsed)),
     }));
   };
   return (
@@ -219,26 +254,108 @@ export const GeneralSettings = () => {
             Works offline, no API key needed. Shows live transcript during recording.
           </Text>
           {localSettings.useLocalTranscription && (
-            <Flex alignItems="center" mt={3}>
-              <Flex flex={1}>
+            <>
+              <Flex alignItems="center" mt={3}>
+                <Flex flex={1}>
+                  <Text fontSize="md" mr={4}>
+                    Whisper Model:
+                  </Text>
+                </Flex>
+                <Flex flex={2}>
+                  <Select
+                    size="md"
+                    value={localSettings.whisperModel}
+                    onChange={(e) =>
+                      setLocalSettings((prev) => ({ ...prev, whisperModel: e.target.value }))
+                    }
+                  >
+                    <option value="large-v3">Large v3 (~3.1GB, best quality)</option>
+                    <option value="large-v3-turbo">Large v3 Turbo (~1.6GB, balanced)</option>
+                    <option value="distil-large-v3.5">Distil Large v3.5 (~1.5GB, fastest)</option>
+                  </Select>
+                </Flex>
+              </Flex>
+
+              <Flex alignItems="center" mt={3}>
                 <Text fontSize="md" mr={4}>
-                  Whisper Model:
+                  Speaker diarization:
                 </Text>
-              </Flex>
-              <Flex flex={2}>
-                <Select
+                <Switch
                   size="md"
-                  value={localSettings.whisperModel}
-                  onChange={(e) =>
-                    setLocalSettings((prev) => ({ ...prev, whisperModel: e.target.value }))
-                  }
-                >
-                  <option value="large-v3">Large v3 (~3.1GB, best quality)</option>
-                  <option value="large-v3-turbo">Large v3 Turbo (~1.6GB, balanced)</option>
-                  <option value="distil-large-v3.5">Distil Large v3.5 (~1.5GB, fastest)</option>
-                </Select>
+                  isChecked={localSettings.useDiarization}
+                  onChange={handleDiarizationChange}
+                />
               </Flex>
-            </Flex>
+              <Text fontSize="sm" color="gray.500">
+                Labels speakers in local transcripts (Speaker 1, Speaker 2, ...).
+              </Text>
+
+              {localSettings.useDiarization && (
+                <>
+                  <Flex alignItems="center" mt={3}>
+                    <Flex flex={1}>
+                      <Text fontSize="md" mr={4}>
+                        Max speakers:
+                      </Text>
+                    </Flex>
+                    <Flex flex={2}>
+                      <Input
+                        type="number"
+                        min={1}
+                        max={12}
+                        value={localSettings.maxSpeakers}
+                        onChange={handleMaxSpeakersChange}
+                      />
+                    </Flex>
+                  </Flex>
+
+                  <Flex alignItems="center" mt={3}>
+                    <Flex flex={1}>
+                      <Text fontSize="md" mr={4}>
+                        Post-diarization language:
+                      </Text>
+                    </Flex>
+                    <Flex flex={2}>
+                      <Select
+                        size="md"
+                        value={localSettings.polishLanguageMode}
+                        onChange={(e) =>
+                          setLocalSettings((prev) => ({
+                            ...prev,
+                            polishLanguageMode: e.target.value as "keep_original" | "translate",
+                          }))
+                        }
+                      >
+                        <option value="keep_original">Nessuna modifica lingua</option>
+                        <option value="translate">Traduci nella lingua scelta</option>
+                      </Select>
+                    </Flex>
+                  </Flex>
+
+                  {localSettings.polishLanguageMode === "translate" && (
+                    <Flex alignItems="center" mt={3}>
+                      <Flex flex={1}>
+                        <Text fontSize="md" mr={4}>
+                          Target language:
+                        </Text>
+                      </Flex>
+                      <Flex flex={2}>
+                        <Input
+                          value={localSettings.polishTargetLanguage}
+                          onChange={(e) =>
+                            setLocalSettings((prev) => ({
+                              ...prev,
+                              polishTargetLanguage: e.target.value,
+                            }))
+                          }
+                          placeholder="Italian"
+                        />
+                      </Flex>
+                    </Flex>
+                  )}
+                </>
+              )}
+            </>
           )}
         </Box>
 
@@ -262,20 +379,36 @@ export const GeneralSettings = () => {
               </Select>
             </Flex>
           </Flex>
-          <Flex alignItems="center" mb={2}>
-            <Flex flex={1}>
-              <Text fontSize="md" mr={4}>
-                OpenAI API Key:
-              </Text>
+<Flex alignItems="center" mb={2}>
+              <Flex flex={1}>
+                <Text fontSize="md" mr={4}>
+                  OpenAI API Key:
+                </Text>
+              </Flex>
+              <Flex flex={2}>
+                <Input
+                  value={localSettings.apiKeyOpenAi}
+                  onChange={onChangeOpenAiApiKey}
+                  placeholder="sk-..."
+                />
+              </Flex>
             </Flex>
-            <Flex flex={2}>
-              <Input
-                value={localSettings.apiKeyOpenAi}
-                onChange={onChangeOpenAiApiKey}
-                placeholder="sk-..."
-              />
+            {localSettings.apiChoice === "openai" && (
+            <Flex alignItems="center" mb={2}>
+              <Flex flex={1}>
+                <Text fontSize="md" mr={4}>
+                  OpenAI Base URL:
+                </Text>
+              </Flex>
+              <Flex flex={2}>
+                <Input
+                  value={localSettings.openAiApiBase}
+                  onChange={e => setLocalSettings(prev => ({ ...prev, openAiApiBase: e.target.value }))}
+                  placeholder="https://api.openai.com/v1"
+                />
+              </Flex>
             </Flex>
-          </Flex>
+            )}
           <Flex alignItems="center" mb={2}>
             <Flex flex={1}>
               <Text fontSize="md" mr={4}>
