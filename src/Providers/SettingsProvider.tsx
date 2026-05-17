@@ -45,6 +45,14 @@ export const DEFAULT_SETTINGS: Settings = {
   api_key_elevenlabs: "",
   embed_api_base: "",
   embed_model: "",
+  transcription_model: "",
+  // Customizable system prompts (empty = use Rust built-in defaults)
+  prompt_cleanup_system: "",
+  prompt_note_title_system: "",
+  prompt_transcript_cleanup: "",
+  prompt_meeting_summary_system: "",
+  prompt_slides_system: "",
+  prompt_podcast_script_system: "",
 };
 
 type Update = (settings: Settings) => Promise<void>;
@@ -75,6 +83,14 @@ export type Settings = {
   api_key_elevenlabs: string;
   embed_api_base: string;
   embed_model: string;
+  transcription_model: string;
+  // Customizable system prompts
+  prompt_cleanup_system: string;
+  prompt_note_title_system: string;
+  prompt_transcript_cleanup: string;
+  prompt_meeting_summary_system: string;
+  prompt_slides_system: string;
+  prompt_podcast_script_system: string;
 };
 
 type SettingsContextType = {
@@ -129,6 +145,14 @@ export const SettingsProvider: FC<PropsWithChildren> = ({ children }) => {
       api_key_elevenlabs: getSettingOrEmpty(response, "api_key_elevenlabs") || "",
       embed_api_base: getSettingOrEmpty(response, "embed_api_base") || "",
       embed_model: getSettingOrEmpty(response, "embed_model") || "",
+      transcription_model: getSettingOrEmpty(response, "transcription_model") || "",
+      // Customizable system prompts
+      prompt_cleanup_system: getSettingOrEmpty(response, "prompt_cleanup_system") || "",
+      prompt_note_title_system: getSettingOrEmpty(response, "prompt_note_title_system") || "",
+      prompt_transcript_cleanup: getSettingOrEmpty(response, "prompt_transcript_cleanup") || "",
+      prompt_meeting_summary_system: getSettingOrEmpty(response, "prompt_meeting_summary_system") || "",
+      prompt_slides_system: getSettingOrEmpty(response, "prompt_slides_system") || "",
+      prompt_podcast_script_system: getSettingOrEmpty(response, "prompt_podcast_script_system") || "",
     };
   };
 

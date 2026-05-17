@@ -34,7 +34,7 @@ Rules:
 - Keep the same language as the transcript
 - If uncertain, return a neutral concise title"##;
 
-fn build_transcript_cleanup_prompt(language_mode: &str, target_language: Option<&str>) -> String {
+fn build_transcript_cleanup_prompt(custom_template: Option<&str>, language_mode: &str, target_language: Option<&str>) -> String {
     let mode = language_mode.trim().to_ascii_lowercase();
     let target = target_language
         .map(str::trim)
@@ -50,17 +50,21 @@ fn build_transcript_cleanup_prompt(language_mode: &str, target_language: Option<
         "- Keep the final polished output in the same language as the source text".to_string()
     };
 
-    format!(
-        r##"You are a transcript cleanup assistant. Clean up the following raw transcript into well-organized markdown:
+    let default_template = r##"You are a transcript cleanup assistant. Clean up the following raw transcript into well-organized markdown:
 
 - Fix grammar, spelling, and punctuation
 - Preserve original meaning, names, decisions, and facts
 - If the transcript contains multiple speakers, preserve speaker labels
-{}
+{language_rule_placeholder}
 
-Return ONLY the cleaned markdown. No explanations, no preamble, no wrapping in code fences."##,
-        language_rule
-    )
+Return ONLY the cleaned markdown. No explanations, no preamble, no wrapping in code fences."##;
+
+    let base_template = match custom_template {
+        Some(t) if !t.trim().is_empty() => t,
+        _ => default_template,
+    };
+
+    base_template.replace("{language_rule_placeholder}", &language_rule)
 }
 
 const MEETING_SUMMARY_SYSTEM_PROMPT: &str = r##"You are a meeting notes assistant. Transform the following raw text into concise meeting notes in markdown:
@@ -96,6 +100,20 @@ Example:
   {"title": "Goals", "bullets": ["Increase MAU by 20%", "Reduce churn to under 5%", "Ship two major features"]},
   {"title": "Next steps", "bullets": ["Finalize roadmap by Friday", "Schedule cross-team review"]}
 ]"##;
+
+/// Load a system prompt from settings, falling back to the provided default.
+/// If the setting is empty or missing, returns the default.
+fn load_system_prompt(
+    app_handle: &tauri::AppHandle,
+    setting_key: &str,
+    default: &str,
+) -> String {
+    let result = app_handle.db(|db| get_setting(db, setting_key));
+    match result {
+        Ok(setting) if !setting.setting_value.trim().is_empty() => setting.setting_value,
+        _ => default.to_string(),
+    }
+}
 
 // Claude types
 #[derive(Serialize)]
@@ -196,7 +214,8 @@ pub async fn clean_up_document_with_llm(
     model_id: Option<String>,
 ) -> Result<String, String> {
     info!("Cleaning up document with provider: {}, model: {:?}", provider, model_id);
-    send_to_llm(&app_handle, &plain_text, &provider, model_id, CLEANUP_SYSTEM_PROMPT).await
+    let prompt = load_system_prompt(&app_handle, "prompt_cleanup_system", CLEANUP_SYSTEM_PROMPT);
+    send_to_llm(&app_handle, &plain_text, &provider, model_id, &prompt).await
 }
 
 pub async fn generate_note_title_with_llm(
@@ -216,7 +235,8 @@ pub async fn generate_note_title_with_llm(
         provider, model_id
     );
 
-    send_to_llm(&app_handle, &input, &provider, model_id, NOTE_TITLE_SYSTEM_PROMPT).await
+    let prompt = load_system_prompt(&app_handle, "prompt_note_title_system", NOTE_TITLE_SYSTEM_PROMPT);
+    send_to_llm(&app_handle, &input, &provider, model_id, &prompt).await
 }
 
 #[tauri::command]
@@ -229,7 +249,12 @@ pub async fn polish_transcript_with_llm(
     target_language: Option<String>,
 ) -> Result<String, String> {
     let mode = language_mode.unwrap_or_else(|| "keep_original".to_string());
-    let prompt = build_transcript_cleanup_prompt(&mode, target_language.as_deref());
+    let custom_template = load_system_prompt(&app_handle, "prompt_transcript_cleanup", "");
+    let prompt = build_transcript_cleanup_prompt(
+        if custom_template.is_empty() { None } else { Some(&custom_template) },
+        &mode,
+        target_language.as_deref(),
+    );
     info!(
         "Polishing transcript with provider: {}, model: {:?}, language_mode: {}",
         provider, model_id, mode
@@ -245,7 +270,8 @@ pub async fn summarize_as_meeting_notes(
     model_id: Option<String>,
 ) -> Result<String, String> {
     info!("Summarizing as meeting notes with provider: {}, model: {:?}", provider, model_id);
-    send_to_llm(&app_handle, &plain_text, &provider, model_id, MEETING_SUMMARY_SYSTEM_PROMPT).await
+    let prompt = load_system_prompt(&app_handle, "prompt_meeting_summary_system", MEETING_SUMMARY_SYSTEM_PROMPT);
+    send_to_llm(&app_handle, &plain_text, &provider, model_id, &prompt).await
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -281,7 +307,8 @@ pub async fn generate_slides_from_document(
         user_prompt.push_str(&format!("\nFocus or style: {}", f));
     }
 
-    let raw = send_to_llm(&app_handle, &user_prompt, &provider, model_id, SLIDES_SYSTEM_PROMPT).await?;
+    let prompt = load_system_prompt(&app_handle, "prompt_slides_system", SLIDES_SYSTEM_PROMPT);
+    let raw = send_to_llm(&app_handle, &user_prompt, &provider, model_id, &prompt).await?;
     parse_slides(&raw)
 }
 
@@ -310,7 +337,8 @@ pub async fn generate_podcast_script(
         user_prompt.push_str(&format!("\nFocus or style: {}", f));
     }
 
-    send_to_llm(app_handle, &user_prompt, provider, model_id, PODCAST_SCRIPT_SYSTEM_PROMPT).await
+    let prompt = load_system_prompt(app_handle, "prompt_podcast_script_system", PODCAST_SCRIPT_SYSTEM_PROMPT);
+    send_to_llm(app_handle, &user_prompt, provider, model_id, &prompt).await
 }
 
 const PODCAST_SCRIPT_SYSTEM_PROMPT: &str = r##"You are a podcast scriptwriter. Turn the user's document into a single-voice narration that sounds natural when read aloud.

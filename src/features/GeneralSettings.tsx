@@ -30,12 +30,27 @@ type LocalSettings = {
   modelGemini: string;
   useLocalTranscription: boolean;
   whisperModel: string;
+  transcriptionModel: string;
   useDiarization: boolean;
   maxSpeakers: number;
   polishLanguageMode: "keep_original" | "translate";
   polishTargetLanguage: string;
   apiKeyElevenlabs: string;
+  promptCleanupSystem: string;
+  promptNoteTitleSystem: string;
+  promptTranscriptCleanup: string;
+  promptMeetingSummarySystem: string;
+  promptSlidesSystem: string;
+  promptPodcastScriptSystem: string;
 };
+
+type PromptKey =
+  | "promptCleanupSystem"
+  | "promptNoteTitleSystem"
+  | "promptTranscriptCleanup"
+  | "promptMeetingSummarySystem"
+  | "promptSlidesSystem"
+  | "promptPodcastScriptSystem";
 
 type ModelOption = {
   id: string;
@@ -68,11 +83,18 @@ export const GeneralSettings = () => {
     modelGemini: settings.model_gemini,
     useLocalTranscription: settings.use_local_transcription,
     whisperModel: settings.whisper_model,
+    transcriptionModel: settings.transcription_model,
     useDiarization: settings.use_diarization,
     maxSpeakers: settings.max_speakers,
     polishLanguageMode: settings.polish_language_mode,
     polishTargetLanguage: settings.polish_target_language,
     apiKeyElevenlabs: settings.api_key_elevenlabs,
+    promptCleanupSystem: settings.prompt_cleanup_system,
+    promptNoteTitleSystem: settings.prompt_note_title_system,
+    promptTranscriptCleanup: settings.prompt_transcript_cleanup,
+    promptMeetingSummarySystem: settings.prompt_meeting_summary_system,
+    promptSlidesSystem: settings.prompt_slides_system,
+    promptPodcastScriptSystem: settings.prompt_podcast_script_system,
   });
 
   const [availableModels, setAvailableModels] = useState<ModelOption[]>([]);
@@ -95,11 +117,18 @@ export const GeneralSettings = () => {
       modelGemini: settings.model_gemini,
       useLocalTranscription: settings.use_local_transcription,
       whisperModel: settings.whisper_model,
+      transcriptionModel: settings.transcription_model,
       useDiarization: settings.use_diarization,
       maxSpeakers: settings.max_speakers,
       polishLanguageMode: settings.polish_language_mode,
       polishTargetLanguage: settings.polish_target_language,
       apiKeyElevenlabs: settings.api_key_elevenlabs,
+      promptCleanupSystem: settings.prompt_cleanup_system,
+      promptNoteTitleSystem: settings.prompt_note_title_system,
+      promptTranscriptCleanup: settings.prompt_transcript_cleanup,
+      promptMeetingSummarySystem: settings.prompt_meeting_summary_system,
+      promptSlidesSystem: settings.prompt_slides_system,
+      promptPodcastScriptSystem: settings.prompt_podcast_script_system,
     });
   }, [settings]);
 
@@ -215,11 +244,18 @@ export const GeneralSettings = () => {
       model_gemini: localSettings.modelGemini,
       use_local_transcription: localSettings.useLocalTranscription,
       whisper_model: localSettings.whisperModel,
+      transcription_model: localSettings.transcriptionModel,
       use_diarization: localSettings.useDiarization,
       max_speakers: Math.max(1, Math.min(12, localSettings.maxSpeakers || 6)),
       polish_language_mode: localSettings.polishLanguageMode,
       polish_target_language: localSettings.polishTargetLanguage.trim() || "Italian",
       api_key_elevenlabs: localSettings.apiKeyElevenlabs,
+      prompt_cleanup_system: localSettings.promptCleanupSystem,
+      prompt_note_title_system: localSettings.promptNoteTitleSystem,
+      prompt_transcript_cleanup: localSettings.promptTranscriptCleanup,
+      prompt_meeting_summary_system: localSettings.promptMeetingSummarySystem,
+      prompt_slides_system: localSettings.promptSlidesSystem,
+      prompt_podcast_script_system: localSettings.promptPodcastScriptSystem,
     });
     savedSuccessfullyToast();
   };
@@ -290,6 +326,74 @@ export const GeneralSettings = () => {
         break;
     }
   };
+
+  const resetPrompt = (key: PromptKey) => {
+    setLocalSettings((prev) => ({ ...prev, [key]: "" }));
+  };
+
+  const PromptField = ({
+    label,
+    description,
+    settingKey,
+    placeholder,
+    rows = 6,
+    showPlaceholderHint = false,
+  }: {
+    label: string;
+    description: string;
+    settingKey: PromptKey;
+    placeholder: string;
+    rows?: number;
+    showPlaceholderHint?: boolean;
+  }) => (
+    <Box mb={6}>
+      <Flex alignItems="center" mb={2}>
+        <Text fontSize="md" fontWeight="medium" flex={1}>
+          {label}
+        </Text>
+        <Button
+          size="xs"
+          variant="link"
+          color="teal.500"
+          onClick={() => resetPrompt(settingKey)}
+        >
+          Reset to default
+        </Button>
+      </Flex>
+      <Text fontSize="xs" color="gray.500" mb={2}>
+        {description}
+        {showPlaceholderHint && (
+          <>
+            {" "}
+            Use <code style={{ background: "#f0f0f0", padding: "1px 4px", borderRadius: "2px" }}>
+              {"{language_rule_placeholder}"}
+            </code> where the language rule should be inserted.
+          </>
+        )}
+      </Text>
+      <textarea
+        rows={rows}
+        style={{
+          width: "100%",
+          padding: "8px",
+          fontSize: "12px",
+          fontFamily: "monospace",
+          border: "1px solid",
+          borderColor: "gray.200",
+          borderRadius: "4px",
+          resize: "vertical",
+        }}
+        value={localSettings[settingKey]}
+        onChange={(e) =>
+          setLocalSettings((prev) => ({
+            ...prev,
+            [settingKey]: e.target.value,
+          }))
+        }
+        placeholder={placeholder}
+      />
+    </Box>
+  );
 
   return (
     <Box>
@@ -429,6 +533,22 @@ export const GeneralSettings = () => {
                 </>
               )}
             </>
+          )}
+          {!localSettings.useLocalTranscription && (
+            <Flex alignItems="center" mt={3}>
+              <Flex flex={1}>
+                <Text fontSize="md">Cloud Transcription Model:</Text>
+              </Flex>
+              <Flex flex={2}>
+                <Input
+                  value={localSettings.transcriptionModel}
+                  onChange={(e) =>
+                    setLocalSettings((prev) => ({ ...prev, transcriptionModel: e.target.value }))
+                  }
+                  placeholder="whisper-1 (leave empty for default)"
+                />
+              </Flex>
+            </Flex>
           )}
         </Box>
 
@@ -664,6 +784,65 @@ export const GeneralSettings = () => {
             When enabled, Platypus will detect when you join a meeting on Zoom,
             Teams, or Slack and offer to start recording.
           </Text>
+        </Box>
+
+        <Box>
+          <Text fontSize="lg" fontWeight="semibold" mb={4}>
+            LLM System Prompts
+          </Text>
+          <Text fontSize="sm" color="gray.500" mb={4}>
+            Customize the system prompts used for AI-powered document processing.
+            Leave blank to use built-in defaults.
+          </Text>
+
+          <PromptField
+            label="Note Cleanup"
+            description="Used when cleaning up raw notes into organized markdown."
+            settingKey="promptCleanupSystem"
+            placeholder="You are a note cleanup assistant. Clean up the following raw text into well-organized markdown: ..."
+            rows={6}
+          />
+
+          <PromptField
+            label="Note Title Generation"
+            description="Used to generate short titles for imported voice notes."
+            settingKey="promptNoteTitleSystem"
+            placeholder="You generate short titles for imported voice notes. ..."
+            rows={4}
+          />
+
+          <PromptField
+            label="Transcript Cleanup"
+            description="Used when polishing raw transcripts into clean markdown."
+            settingKey="promptTranscriptCleanup"
+            placeholder="You are a transcript cleanup assistant. ..."
+            rows={6}
+            showPlaceholderHint
+          />
+
+          <PromptField
+            label="Meeting Summary"
+            description="Used when summarizing raw notes into structured meeting notes."
+            settingKey="promptMeetingSummarySystem"
+            placeholder="You are a meeting notes assistant. Transform the following raw text into concise meeting notes in markdown: ..."
+            rows={6}
+          />
+
+          <PromptField
+            label="Slide Deck Generation"
+            description="Used when generating slide decks from documents (JSON output format)."
+            settingKey="promptSlidesSystem"
+            placeholder="You are an expert at turning documents into clear, well-structured slide decks. ..."
+            rows={8}
+          />
+
+          <PromptField
+            label="Podcast Script"
+            description="Used when generating podcast narration scripts from documents."
+            settingKey="promptPodcastScriptSystem"
+            placeholder="You are a podcast scriptwriter. Turn the user's document into a single-voice narration ..."
+            rows={6}
+          />
         </Box>
 
         <Flex

@@ -1,5 +1,5 @@
 use std::path::{Path, PathBuf};
-use reqwest::{self, multipart, StatusCode};
+use reqwest::{self, StatusCode};
 use anyhow::{Result, anyhow};
 use log::{info, warn, error};
 use std::time::Duration;
@@ -164,6 +164,8 @@ async fn transcribe_single_file(
     client: &reqwest::Client,
     file_path: &Path,
     api_key: &str,
+    model: &str,
+    base_url: &str,
 ) -> Result<String> {
     let file_name = file_path
         .file_name()
@@ -172,26 +174,54 @@ async fn transcribe_single_file(
         .to_string();
     let mime_type = detect_audio_mime(file_path.to_string_lossy().as_ref());
 
+    let transcription_url = if base_url.trim().is_empty() {
+        "https://api.openai.com/v1/audio/transcriptions".to_string()
+    } else {
+        let trimmed = base_url.trim_end_matches('/');
+        if trimmed.ends_with("/v1") {
+            format!("{}/audio/transcriptions", trimmed)
+        } else {
+            format!("{}/v1/audio/transcriptions", trimmed)
+        }
+    };
+
     for attempt in 0..5 {
         if attempt > 0 {
             info!("Retry attempt {} for transcription", attempt);
         }
 
         let file_bytes = std::fs::read(file_path)?;
-        let form = multipart::Form::new()
-            .part(
-                "file",
-                multipart::Part::bytes(file_bytes)
-                    .file_name(file_name.clone())
-                    .mime_str(mime_type)?,
-            )
-            .text("model", "whisper-1")
-            .text("response_format", "text");
+
+        // Build form parts manually to support dynamic model name
+        let boundary = "------------------------a1b2c3d4e5f6";
+        let model_field = format!(
+            "--{}\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\n{}\r\n",
+            boundary, model
+        );
+        let format_field = format!(
+            "--{}\r\nContent-Disposition: form-data; name=\"response_format\"\r\n\r\ntext\r\n",
+            boundary
+        );
+        let file_field = format!(
+            "--{}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{}\"\r\nContent-Type: {}\r\n\r\n",
+            boundary, file_name, mime_type
+        );
+        let terminator = format!("\r\n--{}--\r\n", boundary);
+
+        let body_bytes: Vec<u8> = model_field
+            .into_bytes()
+            .into_iter()
+            .chain(format_field.into_bytes())
+            .chain(file_field.into_bytes())
+            .chain(file_bytes.into_iter())
+            .chain(terminator.into_bytes())
+            .collect();
 
         let response_result = client
-            .post("https://api.openai.com/v1/audio/transcriptions")
+            .post(&transcription_url)
             .header("Authorization", format!("Bearer {}", api_key))
-            .multipart(form)
+            .header("Content-Type", format!("multipart/form-data; boundary={}", boundary))
+            .body(body_bytes)
             .send()
             .await;
 
@@ -234,9 +264,14 @@ async fn transcribe_single_file(
     Err(anyhow!("Failed to transcribe audio after multiple attempts"))
 }
 
-/// Transcribe audio using OpenAI's Whisper API
-pub async fn transcribe_with_openai(file_path: &str, api_key: &str) -> Result<String> {
-    info!("Transcribing with OpenAI Whisper API: {}", file_path);
+/// Transcribe audio using OpenAI-compatible Whisper API
+pub async fn transcribe_with_openai(
+    file_path: &str,
+    api_key: &str,
+    model: &str,
+    base_url: &str,
+) -> Result<String> {
+    info!("Transcribing with OpenAI Whisper API (model: {}, url: {}): {}", model, base_url, file_path);
 
     let input_path = Path::new(file_path);
     let temp_dir = tempfile::Builder::new().prefix("platypus_transcribe_").tempdir()?;
@@ -251,14 +286,14 @@ pub async fn transcribe_with_openai(file_path: &str, api_key: &str) -> Result<St
         .build()?;
 
     if normalized_size <= OPENAI_AUDIO_LIMIT_BYTES {
-        return transcribe_single_file(&client, &normalized_path, api_key).await;
+        return transcribe_single_file(&client, &normalized_path, api_key, model, base_url).await;
     }
 
     // First attempt: compress and retry as a single file.
     if let Ok(compressed_path) = compress_to_target_size(&normalized_path, temp_dir.path()) {
         let size = file_size_bytes(&compressed_path)?;
         if size <= OPENAI_AUDIO_LIMIT_BYTES {
-            return transcribe_single_file(&client, &compressed_path, api_key).await;
+            return transcribe_single_file(&client, &compressed_path, api_key, model, base_url).await;
         }
     }
 
@@ -279,7 +314,7 @@ pub async fn transcribe_with_openai(file_path: &str, api_key: &str) -> Result<St
             chunk_path.display()
         );
 
-        let chunk_text = transcribe_single_file(&client, chunk_path, api_key).await?;
+        let chunk_text = transcribe_single_file(&client, chunk_path, api_key, model, base_url).await?;
         if !full_transcript.is_empty() {
             full_transcript.push_str("\n");
         }

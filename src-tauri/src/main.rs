@@ -540,6 +540,63 @@ async fn update_settings(app_handle: AppHandle, settings: Settings) {
             },
         )
         .unwrap();
+        insert_or_update_setting(
+            db,
+            Setting {
+                setting_key: String::from("transcription_model"),
+                setting_value: settings.transcription_model.clone(),
+            },
+        )
+        .unwrap();
+        // Customizable system prompts
+        insert_or_update_setting(
+            db,
+            Setting {
+                setting_key: String::from("prompt_cleanup_system"),
+                setting_value: settings.prompt_cleanup_system.clone(),
+            },
+        )
+        .unwrap();
+        insert_or_update_setting(
+            db,
+            Setting {
+                setting_key: String::from("prompt_note_title_system"),
+                setting_value: settings.prompt_note_title_system.clone(),
+            },
+        )
+        .unwrap();
+        insert_or_update_setting(
+            db,
+            Setting {
+                setting_key: String::from("prompt_transcript_cleanup"),
+                setting_value: settings.prompt_transcript_cleanup.clone(),
+            },
+        )
+        .unwrap();
+        insert_or_update_setting(
+            db,
+            Setting {
+                setting_key: String::from("prompt_meeting_summary_system"),
+                setting_value: settings.prompt_meeting_summary_system.clone(),
+            },
+        )
+        .unwrap();
+        insert_or_update_setting(
+            db,
+            Setting {
+                setting_key: String::from("prompt_slides_system"),
+                setting_value: settings.prompt_slides_system.clone(),
+            },
+        )
+        .unwrap();
+        insert_or_update_setting(
+            db,
+            Setting {
+                setting_key: String::from("prompt_podcast_script_system"),
+                setting_value: settings.prompt_podcast_script_system.clone(),
+            },
+        )
+        .unwrap();
     });
 
     // Update the runtime flag so the detection loop picks up the change immediately
@@ -1748,7 +1805,22 @@ async fn transcribe_audio_with_preferred_provider(
         return transcribe_audio_with_local_model(app_handle, file_path).await;
     }
 
-    match crate::engine::transcription_engine::transcribe_with_openai(file_path, &openai_api_key).await {
+    let transcription_model = get_transcription_model(app_handle);
+    let model = if transcription_model.is_empty() {
+        "whisper-1".to_string()
+    } else {
+        transcription_model
+    };
+    let openai_base_url = get_openai_api_base(app_handle);
+
+    match crate::engine::transcription_engine::transcribe_with_openai(
+        file_path,
+        &openai_api_key,
+        &model,
+        &openai_base_url,
+    )
+    .await
+    {
         Ok(text) => Ok(text),
         Err(err) => {
             let err_text = err.to_string();
@@ -1765,6 +1837,14 @@ async fn transcribe_audio_with_preferred_provider(
 fn get_openai_api_key(app_handle: &AppHandle) -> String {
     app_handle.db(|db| {
         get_setting(db, "api_key_open_ai")
+            .map(|s| s.setting_value)
+            .unwrap_or_default()
+    })
+}
+
+fn get_openai_api_base(app_handle: &AppHandle) -> String {
+    app_handle.db(|db| {
+        get_setting(db, "openai_api_base")
             .map(|s| s.setting_value)
             .unwrap_or_default()
     })
@@ -1888,6 +1968,14 @@ async fn transcribe_audio_with_local_model(
 fn get_whisper_model_id(app_handle: &AppHandle) -> String {
     app_handle.db(|db| {
         get_setting(db, "whisper_model")
+            .map(|s| s.setting_value)
+            .unwrap_or_default()
+    })
+}
+
+fn get_transcription_model(app_handle: &AppHandle) -> String {
+    app_handle.db(|db| {
+        get_setting(db, "transcription_model")
             .map(|s| s.setting_value)
             .unwrap_or_default()
     })

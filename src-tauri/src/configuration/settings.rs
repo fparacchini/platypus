@@ -27,4 +27,12 @@ pub struct Settings {
     pub api_key_elevenlabs: String,
     pub embed_api_base: String,
     pub embed_model: String,
+    pub transcription_model: String,
+    // Customizable system prompts (empty string = use built-in default)
+    pub prompt_cleanup_system: String,
+    pub prompt_note_title_system: String,
+    pub prompt_transcript_cleanup: String,
+    pub prompt_meeting_summary_system: String,
+    pub prompt_slides_system: String,
+    pub prompt_podcast_script_system: String,
 }
