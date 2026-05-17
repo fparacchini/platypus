@@ -41,7 +41,11 @@
       "Bash(hdiutil attach *)",
       "Bash(cp -R \"/Volumes/Platypus_0.0.2_aarch64/Platypus.app\" /Applications/)",
       "Bash(open *)",
-      "Bash(pkill -f \"platypus\\\\|vite\")"
+      "Bash(pkill -f \"platypus\\\\|vite\")",
+      "Bash(kill 13413)",
+      "Bash(killall Platypus)",
+      "Bash(npm ls *)",
+      "Bash(node -e \"import\\('react-markdown'\\).then\\(m => console.log\\('react-markdown OK, default:', typeof m.default\\)\\).catch\\(e => console.log\\('ERROR:', e.message\\)\\)\")"
     ],
     "deny": [],
     "ask": []

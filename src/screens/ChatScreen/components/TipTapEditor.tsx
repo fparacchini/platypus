@@ -39,6 +39,7 @@ import { useNotify } from "./notifications";
 import { invoke } from "@tauri-apps/api/tauri";
 import { listen } from "@tauri-apps/api/event";
 import { marked } from "marked";
+import ReactMarkdown from "react-markdown";
 import { useProject } from "../../../state";
 import { UNASSIGNED_PROJECT_NAME } from "../../../data/project";
 import { useGlobalSettings } from "../../../Providers/SettingsProvider";
@@ -1191,7 +1192,29 @@ export const TipTapEditor: FC<TipTapEditorProps> = React.memo(({
 
                   <Box borderWidth="1px" borderColor="gray.200" borderRadius="md" p={4} minH="260px" bg="white">
                     {transcriptWorkspace.polished_text.trim() ? (
-                      <Text whiteSpace="pre-wrap" color="gray.800">{transcriptWorkspace.polished_text}</Text>
+                      <Box
+                        sx={{
+                          h1: { fontSize: "xl", fontWeight: 700, mb: 3 },
+                          h2: { fontSize: "lg", fontWeight: 600, mb: 2 },
+                          h3: { fontSize: "md", fontWeight: 600, mb: 2 },
+                          p: { mb: 2, color: "gray.800", lineHeight: 1.6 },
+                          ul: { pl: 4, mb: 2, listStyle: "disc" },
+                          ol: { pl: 4, mb: 2, listStyle: "decimal" },
+                          li: { mb: 1, color: "gray.800", lineHeight: 1.5 },
+                          strong: { fontWeight: 600, color: "gray.800" },
+                          em: { fontStyle: "italic", color: "gray.800" },
+                          blockquote: { borderLeft: "4px solid var(--chakra-colors-gray-200)", pl: 3, color: "gray.600", fontStyle: "italic", mb: 2 },
+                          code: { bg: "gray.100", px: 1, py: 0.5, borderRadius: "sm", fontSize: "sm", color: "gray.800" },
+                          pre: { bg: "gray.50", p: 3, borderRadius: "md", overflowX: "auto", mb: 2 },
+                          table: { width: "100%", borderCollapse: "collapse", mb: 2 },
+                          th: { border: "1px solid gray.200", px: 2, py: 1, bg: "gray.50", textAlign: "left", fontWeight: 600 },
+                          td: { border: "1px solid gray.200", px: 2, py: 1, textAlign: "left" },
+                          hr: { border: "none", borderTop: "1px solid gray.200", my: 3 },
+                          a: { color: "var(--color-primary)", textDecoration: "underline" },
+                        }}
+                      >
+                        <ReactMarkdown>{transcriptWorkspace.polished_text}</ReactMarkdown>
+                      </Box>
                     ) : (
                       <Text color="gray.500" fontStyle="italic">
                         Polished summary not available yet. Use Regenerate polished to create one.
