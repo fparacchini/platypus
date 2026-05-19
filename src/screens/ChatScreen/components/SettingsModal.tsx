@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import {
   Modal,
   ModalOverlay,
@@ -7,9 +7,14 @@ import {
   ModalBody,
   ModalCloseButton,
   Box,
+  Tabs,
+  TabList,
+  TabPanels,
+  Tab,
+  TabPanel,
 } from "@chakra-ui/react";
 import { Title } from "@platypus-app/design";
-import { GeneralSettings } from "../../../features";
+import { GeneralSettings, EndpointsSettings, ModelsSettings, AboutSettings } from "../../../features";
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -22,6 +27,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   isOpen,
   onClose,
 }) => {
+  const [activeTab, setActiveTab] = useState(0);
+
   return (
     <Modal
       isOpen={isOpen}
@@ -55,9 +62,38 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             "&::-webkit-scrollbar-thumb:hover": { bg: "gray.400" },
           }}
         >
-          <Box>
-            <GeneralSettings />
-          </Box>
+          <Tabs
+            index={activeTab}
+            onChange={setActiveTab}
+            variant="enclosed"
+          >
+            <TabList>
+              <Tab>General</Tab>
+              <Tab>Endpoints</Tab>
+              <Tab>Models</Tab>
+              <Tab>About</Tab>
+            </TabList>
+            <TabPanels>
+              <TabPanel pb={6}>
+                <Box>
+                  <GeneralSettings />
+                </Box>
+              </TabPanel>
+              <TabPanel pb={6}>
+                <Box>
+                  <EndpointsSettings />
+                </Box>
+              </TabPanel>
+              <TabPanel pb={6}>
+                <Box>
+                  <ModelsSettings />
+                </Box>
+              </TabPanel>
+              <TabPanel pb={6}>
+                <AboutSettings />
+              </TabPanel>
+            </TabPanels>
+          </Tabs>
         </ModalBody>
       </ModalContent>
     </Modal>

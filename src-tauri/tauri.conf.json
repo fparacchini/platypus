@@ -9,7 +9,7 @@
   },
   "package": {
     "productName": "Platypus",
-    "version": "0.0.2"
+    "version": "0.0.5"
   },
   "tauri": {
     "macOSPrivateApi": true,
@@ -45,7 +45,7 @@
     "bundle": {
       "active": true,
       "category": "DeveloperTool",
-      "copyright": "",
+      "copyright": "Copyright (c) 2026 Altea S.p.A. - Tutti i diritti riservati.",
       "deb": {
         "depends": []
       },

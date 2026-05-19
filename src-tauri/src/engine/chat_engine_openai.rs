@@ -161,3 +161,69 @@ pub async fn list_openai_models(
 
     Ok(models_response.data.into_iter().map(|m| m.id).collect())
 }
+
+#[tauri::command]
+pub async fn list_openai_audio_models(
+    app_handle: tauri::AppHandle,
+) -> Result<Vec<String>, String> {
+    let api_key_setting = app_handle
+        .db(|db| get_setting(db, "api_key_open_ai").map_err(|e| e.to_string()))?;
+
+    if api_key_setting.setting_value.is_empty() {
+        return Err("OpenAI API key not configured".to_string());
+    }
+
+    let base_url_setting = app_handle
+        .db(|db| get_setting(db, "openai_api_base").map_err(|e| e.to_string()))?;
+
+    let base_url = if !base_url_setting.setting_value.trim().is_empty() {
+        base_url_setting.setting_value.clone()
+    } else {
+        "https://api.openai.com".to_string()
+    };
+
+    let base_trimmed = base_url.trim_end_matches('/');
+    let models_url = if base_trimmed.ends_with("/v1") {
+        format!("{}/models", base_trimmed)
+    } else {
+        format!("{}/v1/models", base_trimmed)
+    };
+
+    let client = Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
+
+    let response = client
+        .get(&models_url)
+        .header("Authorization", format!("Bearer {}", api_key_setting.setting_value))
+        .header("Content-Type", "application/json")
+        .send()
+        .await
+        .map_err(|e| format!("Failed to connect to {}: {}", base_url, e))?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        return Err(format!("API returned {}: {}", status, body));
+    }
+
+    let models_response: OpenAIModelsResponse = response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse models response: {}", e))?;
+
+    // Filter for audio/speech models: whisper-*, audio-*, tts-*, speech-*
+    Ok(models_response
+        .data
+        .into_iter()
+        .filter(|m| {
+            let id_lower = m.id.to_lowercase();
+            id_lower.contains("whisper")
+                || id_lower.contains("audio")
+                || id_lower.contains("tts")
+                || id_lower.contains("speech")
+        })
+        .map(|m| m.id)
+        .collect())
+}

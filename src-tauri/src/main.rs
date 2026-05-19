@@ -28,7 +28,7 @@ use crate::configuration::database;
 use crate::configuration::database::drop_database_handle;
 use crate::configuration::state::{AppState, ServiceAccess};
 use crate::engine::chat_engine::{name_conversation, send_prompt_to_llm};
-use crate::engine::chat_engine_openai::{send_prompt_to_openai, list_openai_models};
+use crate::engine::chat_engine_openai::{send_prompt_to_openai, list_openai_models, list_openai_audio_models};
 use crate::engine::chat_engine_gemini::{name_conversation_gemini, send_prompt_to_gemini};
 use crate::engine::chat_engine_local::{name_conversation_local, send_prompt_to_local, list_local_models};
 use crate::engine::clean_up_engine::clean_up;
@@ -199,11 +199,13 @@ async fn main() {
         .invoke_handler(tauri::generate_handler![
             update_settings,
             get_latest_settings,
+            get_app_version,
             send_prompt_to_llm,
             send_prompt_to_openai,
             send_prompt_to_gemini,
             send_prompt_to_local,
             list_openai_models,
+            list_openai_audio_models,
 
             name_conversation_gemini,
             name_conversation_local,
@@ -242,6 +244,7 @@ async fn main() {
             stop_audio_recording,
             read_audio_file,
             transcribe_audio,
+            transcribe_audio_with_segments,
             import_audio_file,
             import_audio_file_enriched,
             extract_document_text,
@@ -328,6 +331,12 @@ fn build_system_tray() -> SystemTray {
     let tray_menu = SystemTrayMenu::new()
         .add_item(quit);
     SystemTray::new().with_menu(tray_menu)
+}
+
+#[tauri::command]
+fn get_app_version() -> String {
+    // Version populated at build time from tauri.conf.json
+    env!("CARGO_PKG_VERSION").to_string()
 }
 
 fn setup_keypress_listener(app_handle: &AppHandle) {
@@ -497,6 +506,14 @@ async fn update_settings(app_handle: AppHandle, settings: Settings) {
             Setting {
                 setting_key: String::from("max_speakers"),
                 setting_value: format!("{}", settings.max_speakers),
+            },
+        )
+        .unwrap();
+        insert_or_update_setting(
+            db,
+            Setting {
+                setting_key: String::from("diarization_mode"),
+                setting_value: settings.diarization_mode.clone(),
             },
         )
         .unwrap();
@@ -1633,6 +1650,33 @@ async fn transcribe_audio(
     Ok(transcription)
 }
 
+#[derive(serde::Serialize)]
+struct TranscriptionResult {
+    text: String,
+    segments: Vec<TranscriptRawSegment>,
+}
+
+#[tauri::command]
+async fn transcribe_audio_with_segments(
+    app_handle: AppHandle,
+    file_path: String,
+) -> Result<TranscriptionResult, String> {
+    log::info!("Transcribing audio file with segments: {}", file_path);
+
+    let (text, segments) = transcribe_audio_with_preferred_provider_inner(&app_handle, &file_path)
+        .await
+        .map_err(|e| format!("Transcription failed: {}", e))?;
+
+    // Clean up the audio file after transcription
+    if let Err(err) = std::fs::remove_file(&file_path) {
+        log::warn!("Failed to delete audio file {}: {}", file_path, err);
+    } else {
+        log::info!("Successfully deleted audio file: {}", file_path);
+    }
+
+    Ok(TranscriptionResult { text, segments })
+}
+
 #[tauri::command]
 async fn import_audio_file(
     app_handle: AppHandle,
@@ -1712,21 +1756,25 @@ async fn import_audio_file_enriched(
         }
     });
 
-    let transcription = transcribe_audio_with_preferred_provider(&app_handle, &file_path)
+    let (transcription, segments) = transcribe_audio_with_preferred_provider_inner(&app_handle, &file_path)
         .await
         .map_err(|e| {
             transcription_done.store(true, Ordering::Relaxed);
             format!("Audio import transcription failed: {}", e)
         })?;
-    
+
     transcription_done.store(true, Ordering::Relaxed);
     let _ = heartbeat_task.await;
 
+    let diarization_mode = get_diarization_mode(&app_handle);
     let use_diarization = get_use_diarization(&app_handle);
     emit_audio_import_progress(&app_handle, &file_path, "titling", 0.72, "Generating note title");
     let note_title = generate_smart_note_title(&app_handle, &transcription).await;
 
-    if !use_diarization {
+    // OpenAI diarization: segments already populated from transcription
+    let is_openai_diarization = diarization_mode == "openai" && !segments.is_empty();
+
+    if !use_diarization && !is_openai_diarization {
         emit_audio_import_progress(&app_handle, &file_path, "completed", 1.0, "Completed without diarization");
         return Ok(AudioImportProcessedResult {
             note_html: compose_raw_only_html(&transcription),
@@ -1742,35 +1790,72 @@ async fn import_audio_file_enriched(
         });
     }
 
-    emit_audio_import_progress(&app_handle, &file_path, "diarizing", 0.78, "Detecting speakers");
-    let max_speakers = get_max_speakers(&app_handle);
-    let segments = rediarize_existing_text(&transcription, max_speakers);
-    if segments.is_empty() {
-        emit_audio_import_progress(&app_handle, &file_path, "completed", 1.0, "Completed without speaker segments");
+    let (final_segments, raw_text, diarization_model_str) = if is_openai_diarization {
+        // Use segments from OpenAI transcription directly
+        let model_label = format!("openai:{}", get_transcription_model(&app_handle));
+        let diarized_segments: Vec<DiarizedSegment> = segments.iter().map(|s| DiarizedSegment {
+            speaker_id: s.speaker_id,
+            text: s.text.clone(),
+            start_ms: s.start_ms,
+            end_ms: s.end_ms,
+            language: s.language.clone(),
+        }).collect();
+        let raw_text = format_segments_as_plain_text(&diarized_segments);
+        let diarization_json = serde_json::to_string(&diarized_segments)
+            .map_err(|e| format!("Failed to serialize diarization: {}", e))?;
+        let (note_html, polish_applied, polished_text) = match auto_polish_diarized_transcript(app_handle.clone(), raw_text.clone()).await {
+            Ok(polished) => (compose_polished_and_raw_html_with_segments(&polished, &diarized_segments), true, Some(polished)),
+            Err(err) => {
+                log::warn!("Auto-polish after OpenAI diarization failed: {}", err);
+                (compose_raw_only_html_with_segments(&diarized_segments), false, None)
+            }
+        };
+        emit_audio_import_progress(&app_handle, &file_path, "completed", 1.0, "Audio import completed with OpenAI diarization");
         return Ok(AudioImportProcessedResult {
-            note_html: compose_raw_only_html(&transcription),
-            raw_text: transcription,
-            diarization_json: None,
+            note_html,
+            raw_text,
+            diarization_json: Some(diarization_json),
             note_title,
-            polish_applied: false,
-            polished_text: None,
-            diarization_model: None,
+            polish_applied,
+            polished_text,
+            diarization_model: Some(model_label),
             synthesis_model: Some(active_synthesis_model_label(&app_handle)),
             polish_language_mode: Some(get_polish_language_mode(&app_handle)),
             polish_target_language: Some(get_polish_target_language(&app_handle)),
         });
-    }
+    } else {
+        // Local WeSpeaker diarization
+        emit_audio_import_progress(&app_handle, &file_path, "diarizing", 0.78, "Detecting speakers");
+        let max_speakers = get_max_speakers(&app_handle);
+        let segs = rediarize_existing_text(&transcription, max_speakers);
+        if segs.is_empty() {
+            emit_audio_import_progress(&app_handle, &file_path, "completed", 1.0, "Completed without speaker segments");
+            return Ok(AudioImportProcessedResult {
+                note_html: compose_raw_only_html(&transcription),
+                raw_text: transcription,
+                diarization_json: None,
+                note_title,
+                polish_applied: false,
+                polished_text: None,
+                diarization_model: None,
+                synthesis_model: Some(active_synthesis_model_label(&app_handle)),
+                polish_language_mode: Some(get_polish_language_mode(&app_handle)),
+                polish_target_language: Some(get_polish_target_language(&app_handle)),
+            });
+        }
+        let raw_text = format_segments_as_plain_text(&segs);
+        (segs, raw_text, "local:text-clustering-v1".to_string())
+    };
 
-    let raw_text = format_segments_as_plain_text(&segments);
-    let diarization_json = serde_json::to_string(&segments)
+    let diarization_json = serde_json::to_string(&final_segments)
         .map_err(|e| format!("Failed to serialize diarization: {}", e))?;
 
     emit_audio_import_progress(&app_handle, &file_path, "polishing", 0.9, "Polishing transcript");
     let (note_html, polish_applied, polished_text) = match auto_polish_diarized_transcript(app_handle.clone(), raw_text.clone()).await {
-        Ok(polished) => (compose_polished_and_raw_html_with_segments(&polished, &segments), true, Some(polished)),
+        Ok(polished) => (compose_polished_and_raw_html_with_segments(&polished, &final_segments), true, Some(polished)),
         Err(err) => {
             log::warn!("Auto-polish after audio import failed: {}", err);
-            (compose_raw_only_html_with_segments(&segments), false, None)
+            (compose_raw_only_html_with_segments(&final_segments), false, None)
         }
     };
 
@@ -1783,7 +1868,7 @@ async fn import_audio_file_enriched(
         note_title,
         polish_applied,
         polished_text,
-        diarization_model: Some("local:text-clustering-v1".to_string()),
+        diarization_model: Some(diarization_model_str),
         synthesis_model: Some(active_synthesis_model_label(&app_handle)),
         polish_language_mode: Some(get_polish_language_mode(&app_handle)),
         polish_target_language: Some(get_polish_target_language(&app_handle)),
@@ -1794,15 +1879,28 @@ async fn transcribe_audio_with_preferred_provider(
     app_handle: &AppHandle,
     file_path: &str,
 ) -> Result<String, String> {
+    let (text, _) = transcribe_audio_with_preferred_provider_inner(app_handle, file_path).await?;
+    Ok(text)
+}
+
+async fn transcribe_audio_with_preferred_provider_inner(
+    app_handle: &AppHandle,
+    file_path: &str,
+) -> Result<(String, Vec<TranscriptRawSegment>), String> {
     let use_local = get_use_local_transcription(app_handle);
     if use_local {
-        return transcribe_audio_with_local_model(app_handle, file_path).await;
+        return transcribe_audio_with_local_model(app_handle, file_path).await
+            .map(|text| (text, Vec::new()));
     }
+
+    let diarization_mode = get_diarization_mode(app_handle);
+    let is_openai_diarization = diarization_mode == "openai";
 
     let openai_api_key = get_openai_api_key(app_handle);
     if openai_api_key.is_empty() {
         log::warn!("OpenAI API key missing, falling back to local transcription");
-        return transcribe_audio_with_local_model(app_handle, file_path).await;
+        return transcribe_audio_with_local_model(app_handle, file_path).await
+            .map(|text| (text, Vec::new()));
     }
 
     let transcription_model = get_transcription_model(app_handle);
@@ -1813,22 +1911,74 @@ async fn transcribe_audio_with_preferred_provider(
     };
     let openai_base_url = get_openai_api_base(app_handle);
 
-    match crate::engine::transcription_engine::transcribe_with_openai(
-        file_path,
-        &openai_api_key,
-        &model,
-        &openai_base_url,
-    )
-    .await
-    {
-        Ok(text) => Ok(text),
-        Err(err) => {
-            let err_text = err.to_string();
-            if should_fallback_to_local(&err_text) {
-                log::warn!("OpenAI transcription failed with auth/config error; falling back to local model");
-                transcribe_audio_with_local_model(app_handle, file_path).await
-            } else {
-                Err(sanitize_openai_error(&err_text))
+    if is_openai_diarization {
+        match crate::engine::transcription_engine::transcribe_with_openai_diarized(
+            file_path,
+            &openai_api_key,
+            &model,
+            &openai_base_url,
+        )
+        .await
+        {
+            Ok(openai_segments) => {
+                let segments: Vec<TranscriptRawSegment> = openai_segments
+                    .into_iter()
+                    .map(|s| TranscriptRawSegment {
+                        speaker_id: s.speaker
+                            .as_ref()
+                            .and_then(|sp| sp.trim().trim_start_matches('S').trim_start_matches('s').split_whitespace().next())
+                            .and_then(|sp| sp.trim_start_matches('#').parse::<u32>().ok())
+                            .unwrap_or(0),
+                        start_ms: s.start.map(|v| v as u64),
+                        end_ms: s.end.map(|v| v as u64),
+                        text: s.text.trim().to_string(),
+                        original_text: None,
+                        language: None,
+                    })
+                    .collect();
+                let text = segments.iter().map(|s| s.text.as_str()).collect::<Vec<_>>().join(" ");
+                Ok((text, segments))
+            }
+            Err(err) => {
+                let err_text = err.to_string();
+                if should_fallback_to_local(&err_text) {
+                    log::warn!("OpenAI diarization failed with auth/config error; falling back to local model");
+                    transcribe_audio_with_local_model(app_handle, file_path).await
+                        .map(|text| (text, Vec::new()))
+                } else {
+                    log::warn!("OpenAI diarization failed: {}; falling back to plain transcription", err_text);
+                    // Fallback to plain transcription
+                    crate::engine::transcription_engine::transcribe_with_openai(
+                        file_path,
+                        &openai_api_key,
+                        &model,
+                        &openai_base_url,
+                    )
+                    .await
+                    .map(|text| (text, Vec::new()))
+                    .map_err(|e| sanitize_openai_error(&e.to_string()))
+                }
+            }
+        }
+    } else {
+        match crate::engine::transcription_engine::transcribe_with_openai(
+            file_path,
+            &openai_api_key,
+            &model,
+            &openai_base_url,
+        )
+        .await
+        {
+            Ok(text) => Ok((text, Vec::new())),
+            Err(err) => {
+                let err_text = err.to_string();
+                if should_fallback_to_local(&err_text) {
+                    log::warn!("OpenAI transcription failed with auth/config error; falling back to local model");
+                    transcribe_audio_with_local_model(app_handle, file_path).await
+                        .map(|text| (text, Vec::new()))
+                } else {
+                    Err(sanitize_openai_error(&err_text))
+                }
             }
         }
     }
@@ -1996,6 +2146,14 @@ fn get_max_speakers(app_handle: &AppHandle) -> usize {
             .and_then(|s| s.setting_value.parse::<usize>().ok())
             .filter(|v| *v > 0 && *v <= 12)
             .unwrap_or(6)
+    })
+}
+
+fn get_diarization_mode(app_handle: &AppHandle) -> String {
+    app_handle.db(|db| {
+        get_setting(db, "diarization_mode")
+            .map(|s| s.setting_value)
+            .unwrap_or_default()
     })
 }
 
