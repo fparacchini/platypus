@@ -4,7 +4,7 @@ import {
   NoDataMessage,
   ErrorMessage,
   LoadingSpinner,
-} from "@platypus-app/design";
+} from "@hermeneia-app/design";
 
 type RenderResultsProps<TData> = {
   results: UseQueryResult<TData>;

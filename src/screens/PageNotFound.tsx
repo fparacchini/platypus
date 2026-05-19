@@ -1,6 +1,6 @@
 import { FC } from "react";
 import styled from "styled-components";
-import { Title } from "@platypus-app/design";
+import { Title } from "@hermeneia-app/design";
 
 const MainWrapper = styled.div`
   display: flex;

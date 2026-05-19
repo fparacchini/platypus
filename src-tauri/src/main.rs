@@ -757,7 +757,7 @@ fn get_app_project_activity_plain_text(
         .map_err(|e| e.to_string())
 }
 
-/// Get all documents across all projects for the "Add content to Platypus" modal
+/// Get all documents across all projects for the "Add content to Hermeneia" modal
 #[tauri::command]
 fn get_all_project_documents(
     app_handle: AppHandle,
@@ -2060,7 +2060,7 @@ async fn transcribe_audio_with_local_model(
     let input_path = file_path.to_string();
     tokio::task::spawn_blocking(move || {
         let tmp = tempfile::Builder::new()
-            .prefix("platypus_local_transcribe_")
+            .prefix("hermeneia_local_transcribe_")
             .suffix(".wav")
             .tempfile()
             .map_err(|e| format!("Failed to allocate temporary wav file: {}", e))?;

@@ -12,7 +12,7 @@ import {
   Text,
   Flex,
 } from "@chakra-ui/react";
-import { Title } from "@platypus-app/design";
+import { Title } from "@hermeneia-app/design";
 import { useForm } from "react-hook-form";
 import { useProject } from "../../state";
 import { type Project } from "../../data/project";

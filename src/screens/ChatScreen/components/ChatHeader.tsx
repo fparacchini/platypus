@@ -1,5 +1,5 @@
 import { FC, ReactElement } from "react";
-import { UserProfileInitials } from "@platypus-app/components";
+import { UserProfileInitials } from "@hermeneia-app/components";
 import { useUser } from "@/state/userState";
 import styled from "styled-components";
 

@@ -53,7 +53,7 @@ import {
   RefreshCcw,
 } from 'lucide-react';
 import { useGlobalSettings } from "../../Providers/SettingsProvider";
-import { Text } from "@platypus-app/design";
+import { Text } from "@hermeneia-app/design";
 import { useProject } from "../../state";
 import { ProjectModal } from "@/components";
 import { type Project } from "../../data/project";
@@ -64,6 +64,11 @@ type DiarizedSegment = {
   start_ms?: number | null;
   end_ms?: number | null;
   language?: string | null;
+};
+
+type TranscriptionResult = {
+  text: string;
+  segments: DiarizedSegment[];
 };
 
 type AudioImportProcessedResult = {
@@ -1093,14 +1098,23 @@ const ProjectSelector: FC<{
         setIsProcessingRecording(false);
         console.log("Recording stopped, file path:", filePath);
 
-        transcription = await invoke<string>('transcribe_audio', { filePath });
+        const isOaiDiarization = settings.diarization_mode === "openai";
+        if (isOaiDiarization) {
+          const result = await invoke<TranscriptionResult>('transcribe_audio_with_segments', { filePath });
+          transcription = result.text;
+          if (result.segments.length > 0) {
+            finalSegmentsRef.current = result.segments;
+          }
+        } else {
+          transcription = await invoke<string>('transcribe_audio', { filePath });
+        }
       }
 
       textToSave = transcription;
 
       const shouldAutoPolishDiarized =
-        settings.use_local_transcription &&
-        settings.use_diarization;
+        (settings.use_local_transcription && settings.use_diarization)
+        || settings.diarization_mode === "openai";
 
       if (shouldAutoPolishDiarized) {
         const rawText = formatRawDiarizedTranscript(finalSegmentsRef.current, transcription);
@@ -1730,6 +1744,9 @@ const ProjectSelector: FC<{
                 <MenuItem icon={<LinkIcon size={14} />} onClick={() => setIsUrlModalOpen(true)}>
                   Import from URL…
                 </MenuItem>
+              <MenuItem icon={<MoreHorizontal size={14} />} onClick={(e: React.MouseEvent) => e.stopPropagation()}>
+                About…
+              </MenuItem>
               </MenuList>
             </Menu>
 

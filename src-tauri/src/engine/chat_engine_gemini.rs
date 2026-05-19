@@ -145,7 +145,7 @@ pub async fn send_prompt_to_gemini(
         }
     }
 
-    const BASE_SYSTEM: &str = "You are Platypus, a friendly and helpful AI note-taking assistant powered by Google Gemini. Keep your tone warm and helpful. Provide answers in markdown format.";
+    const BASE_SYSTEM: &str = "You are Hermeneia, a friendly and helpful AI note-taking assistant powered by Google Gemini. Keep your tone warm and helpful. Provide answers in markdown format.";
     let system_instruction = if !filtered_context.is_empty() {
         grounded_system_prompt(BASE_SYSTEM, &filtered_context)
     } else {

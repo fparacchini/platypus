@@ -1,6 +1,6 @@
 import { type FC, useRef, useEffect } from "react";
 import { Box, IconButton, List, ListItem, Flex } from "@chakra-ui/react";
-import { Text } from "@platypus-app/design";
+import { Text } from "@hermeneia-app/design";
 import { FaRegTrashAlt, FaPlus } from "react-icons/fa";
 import styled from "styled-components";
 import type { Chat } from "../screens/ChatScreen/types";

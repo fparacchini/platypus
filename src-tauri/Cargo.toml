@@ -1,11 +1,11 @@
 [package]
-name = "platypus_notes"
-version = "0.0.5"
-description = "Platypus"
-authors = ["Platypus"]
+name = "hermeneia_notes"
+version = "1.0.0"
+description = "Hermeneia"
+authors = ["Altea"]
 license = ""
 repository = ""
-default-run = "platypus_notes"
+default-run = "hermeneia_notes"
 edition = "2021"
 rust-version = "1.60"
 
@@ -122,7 +122,7 @@ features = [
 ]
 
 [lib]
-name = "platypus_notes"
+name = "hermeneia_notes"
 path = "src/lib.rs"
 
 [[test]]

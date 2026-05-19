@@ -67,7 +67,7 @@ pub fn show_meeting_popup(app_handle: AppHandle, app_name: String) {
         POPUP_LABEL,
         WindowUrl::App("index.html#popup".into()),
     )
-    .title("Platypus Meeting Detected")
+    .title("Hermeneia Meeting Detected")
     .inner_size(POPUP_WIDTH, POPUP_HEIGHT)
     .resizable(false)
     .decorations(false)

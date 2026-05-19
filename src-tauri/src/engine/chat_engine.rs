@@ -166,7 +166,7 @@ pub async fn send_prompt_to_llm(
     // the prompt cache (set on the system block below) can absorb them — sending the
     // doc with each user message instead would miss the cache and re-bill the doc
     // on every turn.
-    const BASE_SYSTEM: &str = "You are Platypus, a friendly and helpful AI note-taking assistant powered by Anthropic. Keep your tone warm and helpful. Provide answers in markdown format.";
+    const BASE_SYSTEM: &str = "You are Hermeneia, a friendly and helpful AI note-taking assistant powered by Anthropic. Keep your tone warm and helpful. Provide answers in markdown format.";
     let system_prompt = if !filtered_context.is_empty() {
         grounded_system_prompt(BASE_SYSTEM, &filtered_context)
     } else if !combined_activity_text.is_empty() {

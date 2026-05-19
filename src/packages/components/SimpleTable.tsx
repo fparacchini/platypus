@@ -3,7 +3,7 @@ import styled from "styled-components";
 import { isString } from "../utils";
 import { ConditionalWrapper } from "./ConditionalWrapper";
 import { Tooltip } from "@chakra-ui/react";
-import { TableHeader, Paginator } from "@platypus-app/components";
+import { TableHeader, Paginator } from "@hermeneia-app/components";
 
 const ContentWrapper = styled.div`
   display: grid;

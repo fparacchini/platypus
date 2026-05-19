@@ -3,7 +3,7 @@ import {
   TableHeader as TableHeaderElement,
   TableHeaderText,
   TableHeaderWrapper,
-} from "@platypus-app/design";
+} from "@hermeneia-app/design";
 
 type TableHeaderProps = {
   columns: [string, number][];

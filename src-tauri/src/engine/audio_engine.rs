@@ -115,7 +115,7 @@ pub async fn start_recording() -> Result<String, String> {
     }
 
     // Create a temporary file path in the system temp directory
-    let app_data_dir = std::env::temp_dir().join("platypus_recordings");
+    let app_data_dir = std::env::temp_dir().join("hermeneia_recordings");
     std::fs::create_dir_all(&app_data_dir)
         .map_err(|e| format!("Failed to create recording directory: {}", e))?;
     

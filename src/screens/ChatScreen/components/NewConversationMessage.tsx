@@ -1,6 +1,6 @@
 import { type FC } from "react";
 import styled from "styled-components";
-import { Text } from "@platypus-app/design";
+import { Text } from "@hermeneia-app/design";
 const NewConversationContainer = styled.div`
   display: flex;
   flex: 1;
@@ -10,7 +10,7 @@ const NewConversationContainer = styled.div`
   justify-content: center;
 `;
 
-const PlatypusIcon = styled.div`
+const HermeneiaIcon = styled.div`
   width: 48px;
   height: 48px;
   background: linear-gradient(135deg, #0d9488, #14b8a6);
@@ -26,9 +26,9 @@ const PlatypusIcon = styled.div`
 
 export const NewConversationMessage: FC = () => (
   <NewConversationContainer>
-    <PlatypusIcon>P</PlatypusIcon>
+    <HermeneiaIcon>H</HermeneiaIcon>
     <Text type="m" bold>
-      What's on your mind? Ask Platypus anything or start a new note
+      What's on your mind? Ask Hermeneia anything or start a new note
     </Text>
   </NewConversationContainer>
 );

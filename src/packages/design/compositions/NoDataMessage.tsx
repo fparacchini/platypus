@@ -1,6 +1,6 @@
 import { type CSSProperties, type FC } from "react";
 import styled from "styled-components";
-import { TitleSecondary } from "@platypus-app/design";
+import { TitleSecondary } from "@hermeneia-app/design";
 type ContainerProps = {
   height?: CSSProperties["height"];
 };

@@ -93,7 +93,7 @@ export const GeneralSettings = () => {
         <Box>
           <Flex alignItems="center" mb={2}>
             <Text fontSize="md" mr={4}>
-              Autostart Platypus:
+              Autostart Hermeneia:
             </Text>
             <Switch
               size="md"
@@ -179,7 +179,7 @@ export const GeneralSettings = () => {
             />
           </Flex>
           <Text fontSize="sm" color="gray.500">
-            When enabled, Platypus will detect when you join a meeting on Zoom,
+            When enabled, Hermeneia will detect when you join a meeting on Zoom,
             Teams, or Slack and offer to start recording.
           </Text>
         </Box>

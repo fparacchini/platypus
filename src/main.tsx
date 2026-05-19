@@ -6,7 +6,7 @@ import { ChakraProvider } from "@chakra-ui/react";
 import { extendTheme, type ThemeConfig } from "@chakra-ui/react";
 import { attachConsole } from "tauri-plugin-log-api";
 import { appWindow } from "@tauri-apps/api/window";
-import "@platypus-app/design/index.css";
+import "@hermeneia-app/design/index.css";
 import { App } from "./App";
 import { MeetingPopup } from "./components/MeetingPopup";
 import { theme } from "./theme";

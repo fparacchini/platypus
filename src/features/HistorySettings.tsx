@@ -1,7 +1,7 @@
 import { type FC, useState, useEffect } from "react";
 import styled from "styled-components";
 import { invoke } from "@tauri-apps/api/tauri";
-import { Title, Text } from "@platypus-app/design";
+import { Title, Text } from "@hermeneia-app/design";
 import { Table, Thead, Tbody, Tr, Th, Td, IconButton } from "@chakra-ui/react";
 import { FaRegTrashAlt } from "react-icons/fa";
 

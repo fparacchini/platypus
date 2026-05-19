@@ -1,142 +1,166 @@
-<p align="center">
-  <img src="docs/images/banner.svg" alt="Platypus — notes, meetings, and knowledge, on your machine" width="100%"/>
-</p>
+# Hermeneia
 
-# Platypus Notes
+Hermeneia is an AI-powered note-taking, transcription, and knowledge management app. It captures audio from meetings and voice notes, transcribes them with speaker diarization, and uses LLMs to generate clean notes, summaries, slide decks, and podcast scripts.
 
-An open-source desktop app for taking notes, transcribing meetings, and chatting with your documents. Runs entirely on your machine — the only network calls are to whichever LLM you choose to connect, and only when you ask a question.
+A fork of [Platypus](https://github.com/pixelsmasher13/platypus).
 
-[**Download for macOS**](https://the-platypus-app.s3.amazonaws.com/PlatypusNotes-latest.dmg) · [platypusnotes.com](https://platypusnotes.com) · MIT license
+Copyright (c) 2026 Altea S.p.A. — Tutti i diritti riservati.
+Licensed under the MIT License (original Platypus code).
 
-<video src="https://github.com/user-attachments/assets/e034862a-0def-4b75-a133-d850d191d82a" autoplay loop muted playsinline></video>
+## Features
 
-## What it does
+- **Audio Recording** — Record voice notes or auto-detect meetings (Zoom, Teams, Slack) and start recording automatically
+- **Local & Cloud Transcription** — Run Whisper models locally (offline, no API key) or use OpenAI Whisper API
+- **Speaker Diarization** — Label speakers (Speaker 1, Speaker 2, ...) using local WeSpeaker model or OpenAI server-side diarization
+- **AI-Powered Cleanup** — Clean raw transcripts into organized markdown with configurable system prompts
+- **Meeting Summaries** — Generate structured meeting notes from transcripts
+- **Slide Decks** — Convert documents into presentation slides (JSON output)
+- **Podcast Scripts** — Generate narration scripts from documents, with text-to-speech via ElevenLabs
+- **Document Indexing (RAG)** — Index documents with OpenAI embeddings for contextual AI answers
+- **Multi-Provider AI** — Claude, OpenAI, Gemini, or local Ollama models
+- **Customizable Prompts** — Edit system prompts for every AI operation
 
-- **Capture meetings** — auto-detects Zoom and Teams calls; transcribes locally via Whisper or via OpenAI's API
-- **Organize notes and documents** — rich editor with PDF/DOCX/TXT import, project grouping, and AI-assisted polish
-- **Chat with everything you've written** — per-project HNSW vector search, with Claude, OpenAI, Gemini, or any local Ollama model. Answers are grounded in your notes with inline `[n]` citations you can click to jump to the source passage
-- **Generate from any note** — turn a meeting transcript or document into structured meeting notes, a slide deck, or an audio podcast (via ElevenLabs)
+## Acquisition Pipeline
 
-Data stays on disk in SQLite. In local transcription mode, audio never leaves your machine.
-
-## Features at a glance
-
-<p align="center">
-  <img src="docs/images/feature-live-transcription.svg" alt="Live transcription — words appear on screen as they're spoken; Whisper runs locally" width="100%"/>
-</p>
-
-<p align="center">
-  <img src="docs/images/feature-note-cleanup.svg" alt="Note cleanup — turn raw transcripts into structured decisions and action items" width="100%"/>
-</p>
-
-<p align="center">
-  <img src="docs/images/feature-chat-sources.svg" alt="Chat with your notes — answers cite the source passage so you can verify" width="100%"/>
-</p>
-
-## How it compares
-
-|                              | Platypus    | Granola | NotebookLM | Otter.ai |
-| ---------------------------- | ----------- | ------- | ---------- | -------- |
-| Stores data on your machine  | ✅          | ❌      | ❌         | ❌       |
-| Meeting transcription        | ✅          | ✅      | ❌         | ✅       |
-| RAG over your notes/docs     | ✅          | partial | ✅         | ❌       |
-| Bring your own LLM           | ✅          | ❌      | ❌         | ❌       |
-| Open source                  | ✅          | ❌      | ❌         | ❌       |
-| Free                         | ✅          | partial | partial    | ❌       |
-| Native desktop               | ✅          | ✅      | ❌         | ❌       |
-
-## Voice transcription
-
-Two modes, switchable in Settings.
-
-**Local Whisper (default)** — on-device transcription via whisper.cpp.
-
-- Real-time: live transcript streams during recording
-- Works offline, no API key required
-- Hardware-accelerated via Metal on macOS, CPU fallback elsewhere
-- Models (selectable in Settings): Large v3 (~3.1GB, default, best quality), Large v3 Turbo (~1.6GB), Distil Large v3.5 (~1.5GB, fastest)
-- Model auto-downloads on first use
-
-**OpenAI API** — records WAV, uploads to OpenAI's Whisper endpoint.
-
-- Requires an OpenAI API key
-- Transcribes after recording finishes (not real-time)
-
-## Tech stack
-
-| Layer            | Technology                                                                        |
-| ---------------- | --------------------------------------------------------------------------------- |
-| Desktop shell    | Tauri v1 (1.5.2)                                                                  |
-| Backend          | Rust                                                                              |
-| Frontend         | React + TypeScript + Vite                                                         |
-| UI               | Chakra UI + styled-components                                                     |
-| Editor           | TipTap                                                                            |
-| AI providers     | Claude, OpenAI, Gemini, Ollama                                                    |
-| Transcription    | whisper-rs v0.16 (local) / OpenAI Whisper API (cloud)                             |
-| Audio            | CPAL (recording), nnnoiseless (denoising), rubato (resampling)                    |
-| Database         | SQLite (rusqlite)                                                                 |
-| Vector search    | HNSW (hnswlib-rs)                                                                 |
-
-## Build from source
-
-### Requirements
-
-- Node 18+ (recommended via [nvm](https://github.com/nvm-sh/nvm))
-- [Rust](https://www.rust-lang.org/tools/install)
-- **cmake** — required by `whisper-rs-sys` to compile whisper.cpp
-  - macOS: `brew install cmake`
-  - Windows: `winget install Kitware.CMake`
-- **LLVM / libclang** (Windows only — required by `bindgen` when building `whisper-rs-sys`; macOS ships this via Xcode Command Line Tools)
-  - `winget install LLVM.LLVM`
-  - Then set `LIBCLANG_PATH` so `bindgen` can find `libclang.dll`:
-    ```
-    setx LIBCLANG_PATH "C:\Program Files\LLVM\bin"
-    ```
-    Open a new terminal afterward so the env var is picked up.
-
-### Run in dev
-
-```bash
-npm install
-npm run tauri dev
+```
+┌─────────────┐     ┌──────────────┐     ┌─────────────────┐
+│  Recording   │────▶│ Transcription│────▶│   Diarization   │
+│  (cpal/WAV)  │     │  (Whisper /  │     │  (WeSpeaker /   │
+│              │     │   OpenAI API) │     │   OpenAI API)   │
+└─────────────┘     └──────────────┘     └─────────────────┘
+                                                          │
+                                                          ▼
+┌───────────────┐     ┌──────────────┐     ┌─────────────────────┐
+│   Podcast     │     │   Cleanup &  │     │   Content Storage   │
+│   Generation  │◀────│  Generation  │◀────│  (SQLite + HNSW     │
+│  (ElevenLabs) │     │   (LLM)      │     │   vector index)     │
+└───────────────┘     └──────────────┘     └─────────────────────┘
 ```
 
-If you hit dependency issues, delete `package-lock.json` and re-run `npm install`.
+### 1. Audio Capture
 
-Add your LLM API keys in Settings before use.
+Hermeneia records audio from the default microphone using **cpal** (Cross-Platform Audio Library). Audio is captured in real-time as 16-bit mono WAV files.
 
-### Build a release
+- **Manual recording** — Start/stop via the UI
+- **Meeting detection** — Monitors running processes:
+  - Zoom: detects `CptHost` process (active meeting indicator)
+  - Teams: detects `MSTeams` or `Teams` processes
+  - Slack: detects Slack window focus changes
+- When a meeting is detected, a popup offers to start recording automatically
+- Recording state is tracked via an atomic flag to avoid false positives from Hermeneia's own recording
 
-```bash
-npm install
-npm run tauri build
+### 2. Transcription
+
+Two transcription backends are available:
+
+**Local Whisper** (default)
+- Uses **whisper-rs** (Rust bindings for whisper.cpp)
+- Models: `large-v3` (~3.1GB), `large-v3-turbo` (~1.6GB), `distil-large-v3.5` (~1.5GB)
+- Runs offline, no API key required
+- Shows live transcript during recording via streaming inference
+
+**Cloud OpenAI API**
+- Uses OpenAI Whisper API (`whisper-1` model)
+- Requires OpenAI API key
+- Supports custom model selection via API
+- Files must be under 24MB
+
+Audio preprocessing uses **ffmpeg** to convert any input format to 16kHz mono WAV.
+
+### 3. Diarization
+
+Separates speakers in the transcript:
+
+**Local (WeSpeaker)**
+- Uses an ONNX ResNet34 model downloaded from HuggingFace
+- Streaming recluster algorithm assigns speaker IDs in real-time
+- Configurable max speakers (1-12)
+- No API key needed, works offline
+
+**OpenAI API**
+- Server-side diarization via OpenAI Whisper API
+- Returns speaker labels directly in the transcript segments
+
+### 4. Content Generation
+
+Transcribed text flows through configurable LLM pipelines:
+
+**Note Cleanup** — Fixes grammar, spelling, formatting; preserves meaning and tone
+
+**Note Title Generation** — Creates concise titles (max 8 words) from transcripts
+
+**Transcript Cleanup** — Polishes raw transcripts into structured markdown with speaker labels, language translation support
+
+**Meeting Summary** — Transforms raw notes into concise, structured meeting notes
+
+**Slide Deck Generation** — Produces JSON-formatted slide decks from documents
+
+**Podcast Script** — Generates single-voice narration scripts, optionally converted to audio via ElevenLabs TTS (multilingual_v2 model)
+
+All prompts are customizable in Settings → LLM System Prompts.
+
+### 5. Storage & Retrieval
+
+- **SQLite database** — Stores projects, documents, chat history, settings
+- **HNSW vector index** — Embeds document chunks using OpenAI embeddings for semantic search
+- **RAG (Retrieval-Augmented Generation)** — When enabled, relevant document chunks are automatically injected into LLM prompts based on the user's question
+
+## Architecture
+
+```
+src-tauri/src/
+  main.rs                  — App entry, Tauri builder, command registration
+  engine/
+    audio_engine.rs        — Microphone recording (cpal)
+    transcription_engine.rs — Whisper / OpenAI API transcription
+    whisper_engine.rs      — Local whisper.cpp integration
+    diarization_engine.rs  — WeSpeaker speaker separation
+    meeting_detector.rs    — Process monitoring for Zoom/Teams/Slack
+    meeting_popup.rs       — Meeting detection notification UI
+    chat_engine*.rs        — LLM integration (Claude, OpenAI, Gemini, Ollama)
+    document_cleanup_engine.rs — AI cleanup/summary/slide/podcast generation
+    podcast_generator.rs   — ElevenLabs text-to-speech
+    similarity_search_engine.rs — HNSW vector search
+    project_vector_engine.rs — Per-project document indexing
+  configuration/
+    database.rs            — SQLite initialization
+    settings.rs            — Settings CRUD
+    state.rs               — Shared app state
+  repository/              — Data access layer
 ```
 
-For a signed + notarized macOS build that uploads to your S3 bucket, see [`scripts/build-mac.sh`](scripts/build-mac.sh) — requires Apple Developer credentials in `.env.build`.
+## Settings
 
-## Architecture notes
+Configured via Settings modal (4 tabs):
 
-A few of the less-obvious decisions:
+- **General** — Autostart, RAG indexing, meeting detection, ElevenLabs key, system prompts
+- **Endpoints** — API keys and base URLs per provider (Claude, OpenAI, Gemini, Ollama)
+- **Models** — LLM model, speech recognition model, diarization mode selection
+- **About** — Version, copyright, third-party acknowledgments
 
-- **Audio pipeline**: CPAL capture → energy-based VAD on raw samples → nnnoiseless denoising at 48kHz → rubato resample to 16kHz → whisper.cpp via [whisper-rs](https://github.com/tazz4843/whisper-rs). VAD runs *before* denoise because RNNoise crushes signal amplitude ~100x and every chunk would otherwise look silent.
-- **Meeting detection**: Zoom is detected by presence of the `CptHost` process; Teams by CPU usage on its `audio.mojom.AudioService` sub-process. No Zoom/Teams API access required.
-- **Vector search**: per-project HNSW indices ([hnswlib-rs](https://github.com/jean-pierreBoth/hnswlib-rs)); documents chunked and embedded on save when vectorization is enabled.
-- **Grounded chat with inline citations**: retrieved chunks are numbered `[1]..[n]` in the system prompt, the LLM is instructed to cite every claim and refuse to invent answers, and the same numbering is emitted to the UI so each `[n]` in the response is a clickable chip that opens the supporting passage.
+## Tech Stack
 
-## Contributing
+- **Frontend** — React, TypeScript, Chakra UI, Vite
+- **Backend** — Tauri (Rust), SQLite (rusqlite), HNSW
+- **Audio** — cpal, hound, ffmpeg, whisper.cpp (via whisper-rs)
+- **Diarization** — WeSpeaker ONNX (via nnnoiseless, rubato)
+- **Vector Search** — hnswlib-rs
+- **AI Providers** — Anthropic Claude, OpenAI, Google Gemini, Ollama (local)
+- **TTS** — ElevenLabs API
 
-See [CONTRIBUTING.md](CONTRIBUTING.md).
+## Third-Party Components
 
-## Acknowledgments
+This software includes components subject to their respective licenses:
+- whisper.cpp
+- whisper-rs
+- Distil-Whisper
+- nnnoiseless
+- rubato
+- hnswlib-rs
 
-Platypus stands on the shoulders of:
+## Requirements
 
-- [whisper.cpp](https://github.com/ggerganov/whisper.cpp) and [whisper-rs](https://github.com/tazz4843/whisper-rs) — local speech-to-text
-- [Distil-Whisper](https://huggingface.co/distil-whisper) by HuggingFace — the distilled Whisper variants
-- [nnnoiseless](https://github.com/jneem/nnnoiseless) — pure-Rust port of Mozilla's RNNoise
-- [rubato](https://github.com/HEnquist/rubato) — sample-rate conversion
-- [hnswlib-rs](https://github.com/jean-pierreBoth/hnswlib-rs) — HNSW vector index
-
-## License
-
-MIT.
+- macOS (primary platform)
+- ffmpeg (for audio preprocessing)
+- OpenAI API key (optional, for cloud transcription/diarization/RAG)
+- ElevenLabs API key (optional, for podcast generation)

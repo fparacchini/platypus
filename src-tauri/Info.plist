@@ -3,15 +3,15 @@
 <plist version="1.0">
 <dict>
     <key>NSMicrophoneUsageDescription</key>
-    <string>Platypus needs microphone access to record voice notes</string>
+    <string>Hermeneia needs microphone access to record voice notes</string>
     <key>CFBundleURLTypes</key>
     <array>
         <dict>
             <key>CFBundleURLName</key>
-            <string>com.platypusnotes.dev</string>
+            <string>com.hermeneianotes.dev</string>
             <key>CFBundleURLSchemes</key>
             <array>
-                <string>platypus</string>
+                <string>hermeneia</string>
             </array>
         </dict>
     </array>

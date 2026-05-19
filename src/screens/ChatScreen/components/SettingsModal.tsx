@@ -13,7 +13,7 @@ import {
   Tab,
   TabPanel,
 } from "@chakra-ui/react";
-import { Title } from "@platypus-app/design";
+import { Title } from "@hermeneia-app/design";
 import { GeneralSettings, EndpointsSettings, ModelsSettings, AboutSettings } from "../../../features";
 
 interface SettingsModalProps {

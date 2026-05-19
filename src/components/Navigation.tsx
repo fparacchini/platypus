@@ -1,6 +1,6 @@
 import type { FC, PropsWithChildren } from "react";
 import { Grid, GridItem, Flex } from "@chakra-ui/react";
-import { UserProfile } from "@platypus-app/components";
+import { UserProfile } from "@hermeneia-app/components";
 
 type NavigationProps = {} & PropsWithChildren;
 

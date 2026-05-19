@@ -7,6 +7,19 @@ use std::process::Command;
 
 const OPENAI_AUDIO_LIMIT_BYTES: u64 = 24 * 1024 * 1024;
 
+#[derive(serde::Deserialize, Debug, Clone)]
+pub struct OpenAISegment {
+    pub speaker: Option<String>,
+    pub start: Option<f64>,
+    pub end: Option<f64>,
+    pub text: String,
+}
+
+#[derive(serde::Deserialize, Debug)]
+struct OpenAIJsonResponse {
+    segments: Vec<OpenAISegment>,
+}
+
 fn detect_audio_mime(file_path: &str) -> &'static str {
     let ext = Path::new(file_path)
         .extension()
@@ -274,7 +287,7 @@ pub async fn transcribe_with_openai(
     info!("Transcribing with OpenAI Whisper API (model: {}, url: {}): {}", model, base_url, file_path);
 
     let input_path = Path::new(file_path);
-    let temp_dir = tempfile::Builder::new().prefix("platypus_transcribe_").tempdir()?;
+    let temp_dir = tempfile::Builder::new().prefix("hermeneia_transcribe_").tempdir()?;
 
     let normalized_path = ensure_ogg_compatibility(input_path, temp_dir.path())?;
     let normalized_size = file_size_bytes(&normalized_path)?;
@@ -322,4 +335,178 @@ pub async fn transcribe_with_openai(
     }
 
     Ok(full_transcript)
+}
+
+/// Transcribe audio with OpenAI diarization, returns diarized segments
+pub async fn transcribe_with_openai_diarized(
+    file_path: &str,
+    api_key: &str,
+    model: &str,
+    base_url: &str,
+) -> Result<Vec<OpenAISegment>> {
+    info!("Transcribing with OpenAI diarization (model: {}, url: {}): {}", model, base_url, file_path);
+
+    let input_path = Path::new(file_path);
+    let temp_dir = tempfile::Builder::new().prefix("hermeneia_transcribe_").tempdir()?;
+
+    let normalized_path = ensure_ogg_compatibility(input_path, temp_dir.path())?;
+    let normalized_size = file_size_bytes(&normalized_path)?;
+    info!("Prepared audio size: {} bytes", normalized_size);
+
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(120))
+        .build()?;
+
+    if normalized_size <= OPENAI_AUDIO_LIMIT_BYTES {
+        return transcribe_single_file_diarized(&client, &normalized_path, api_key, model, base_url).await;
+    }
+
+    // First attempt: compress
+    if let Ok(compressed_path) = compress_to_target_size(&normalized_path, temp_dir.path()) {
+        let size = file_size_bytes(&compressed_path)?;
+        if size <= OPENAI_AUDIO_LIMIT_BYTES {
+            return transcribe_single_file_diarized(&client, &compressed_path, api_key, model, base_url).await;
+        }
+    }
+
+    // Fallback: chunked
+    warn!("Audio too large for diarization; switching to chunked transcription");
+
+    let chunks = split_audio_for_chunked_transcription(&normalized_path, temp_dir.path())?;
+    info!("Created {} chunk(s) for diarized transcription", chunks.len());
+
+    let mut all_segments: Vec<OpenAISegment> = Vec::new();
+    for (idx, chunk_path) in chunks.iter().enumerate() {
+        info!("Transcribing chunk {}/{} for diarization", idx + 1, chunks.len());
+        let chunk_segments = transcribe_single_file_diarized(&client, chunk_path, api_key, model, base_url).await?;
+        all_segments.extend(chunk_segments);
+    }
+
+    Ok(all_segments)
+}
+
+async fn transcribe_single_file_diarized(
+    client: &reqwest::Client,
+    file_path: &Path,
+    api_key: &str,
+    model: &str,
+    base_url: &str,
+) -> Result<Vec<OpenAISegment>> {
+    let file_name = file_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("audio.wav")
+        .to_string();
+    let mime_type = detect_audio_mime(file_path.to_string_lossy().as_ref());
+
+    let transcription_url = if base_url.trim().is_empty() {
+        "https://api.openai.com/v1/audio/transcriptions".to_string()
+    } else {
+        let trimmed = base_url.trim_end_matches('/');
+        if trimmed.ends_with("/v1") {
+            format!("{}/audio/transcriptions", trimmed)
+        } else {
+            format!("{}/v1/audio/transcriptions", trimmed)
+        }
+    };
+
+    for attempt in 0..5 {
+        if attempt > 0 {
+            info!("Retry attempt {} for diarized transcription", attempt);
+        }
+
+        let file_bytes = std::fs::read(file_path)?;
+
+        let boundary = "------------------------a1b2c3d4e5f6";
+        let model_field = format!(
+            "--{}\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\n{}\r\n",
+            boundary, model
+        );
+        let format_field = format!(
+            "--{}\r\nContent-Disposition: form-data; name=\"response_format\"\r\n\r\njson\r\n",
+            boundary
+        );
+        let diarization_field = format!(
+            "--{}\r\nContent-Disposition: form-data; name=\"diarization\"\r\n\r\ntrue\r\n",
+            boundary
+        );
+        let file_field = format!(
+            "--{}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{}\"\r\nContent-Type: {}\r\n\r\n",
+            boundary, file_name, mime_type
+        );
+        let terminator = format!("\r\n--{}--\r\n", boundary);
+
+        let body_bytes: Vec<u8> = model_field
+            .into_bytes()
+            .into_iter()
+            .chain(format_field.into_bytes())
+            .chain(diarization_field.into_bytes())
+            .chain(file_field.into_bytes())
+            .chain(file_bytes.into_iter())
+            .chain(terminator.into_bytes())
+            .collect();
+
+        let response_result = client
+            .post(&transcription_url)
+            .header("Authorization", format!("Bearer {}", api_key))
+            .header("Content-Type", format!("multipart/form-data; boundary={}", boundary))
+            .body(body_bytes)
+            .send()
+            .await;
+
+        match response_result {
+            Ok(response) => {
+                if response.status().is_success() {
+                    let json_text: String = response.text().await?;
+                    info!("Diarized transcription successful, length: {}", json_text.len());
+
+                    // Try to parse as diarized JSON response
+                    if let Ok(parsed) = serde_json::from_str::<OpenAIJsonResponse>(&json_text) {
+                        info!("Parsed {} diarized segments", parsed.segments.len());
+                        return Ok(parsed.segments);
+                    }
+
+                    // Fallback: treat as plain text (some compatible APIs may not support diarization)
+                    warn!("Response not in expected diarized JSON format, falling back to plain text");
+                    let segments = vec![OpenAISegment {
+                        speaker: None,
+                        start: None,
+                        end: None,
+                        text: json_text,
+                    }];
+                    return Ok(segments);
+                }
+
+                let status = response.status();
+                let error_text = response.text().await.unwrap_or_default();
+                error!("Diarized transcription failed with status {}: {}", status, error_text);
+
+                if status == StatusCode::TOO_MANY_REQUESTS || (status.as_u16() >= 500 && status.as_u16() < 600) {
+                    let sleep_duration = Duration::from_secs(2u64.pow(attempt));
+                    warn!("Rate limited or server error, sleeping for {}s before retry", sleep_duration.as_secs());
+                    tokio::time::sleep(sleep_duration).await;
+                    continue;
+                }
+
+                // If diarization is not supported by this endpoint/model, fall back to plain transcription
+                if error_text.contains("diarization") || error_text.contains("not supported") {
+                    warn!("Diarization not supported, falling back to plain transcription");
+                    return transcribe_single_file(client, file_path, api_key, model, base_url).await
+                        .map(|text| vec![OpenAISegment {
+                            speaker: None, start: None, end: None, text
+                        }]);
+                }
+
+                return Err(anyhow!("OpenAI API error {}: {}", status, error_text));
+            }
+            Err(err) => {
+                error!("Request error: {}", err);
+                let sleep_duration = Duration::from_secs(2u64.pow(attempt));
+                warn!("Connection error, sleeping for {}s before retry", sleep_duration.as_secs());
+                tokio::time::sleep(sleep_duration).await;
+            }
+        }
+    }
+
+    Err(anyhow!("Failed to transcribe audio with diarization after multiple attempts"))
 }

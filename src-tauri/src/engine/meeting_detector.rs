@@ -87,7 +87,7 @@ mod core_audio_ffi {
 
 /// Returns `true` when something (anything) is actively reading from the
 /// default input device — i.e. the orange mic dot is currently on. We
-/// subtract Platypus's own recording state so our own recorder doesn't
+/// subtract Hermeneia's own recording state so our own recorder doesn't
 /// trigger false positives.
 #[cfg(target_os = "macos")]
 fn is_external_mic_active() -> bool {
@@ -95,7 +95,7 @@ fn is_external_mic_active() -> bool {
     use std::ffi::c_void;
 
     if crate::engine::audio_engine::IS_RECORDING.load(Ordering::Relaxed) {
-        // Platypus is recording — we can't distinguish "us only" from "us +
+        // Hermeneia is recording — we can't distinguish "us only" from "us +
         // Teams" via this property, so suppress detection while we record.
         return false;
     }
@@ -351,7 +351,7 @@ pub fn start_meeting_detection(app_handle: AppHandle) {
                 show_corner_notification(&app_handle, app_name);
 
                 // In-app banner via frontend event (independent path —
-                // shown if Platypus is already focused).
+                // shown if Hermeneia is already focused).
                 if let Some(window) = app_handle.get_window("main") {
                     let _ = window.emit("meeting-detected", app_name.clone());
                 }

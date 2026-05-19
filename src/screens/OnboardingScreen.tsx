@@ -70,7 +70,7 @@ const Dot = styled(motion.div)`
 
 const initialSteps = [
   {
-    title: "Welcome to Platypus",
+    title: "Welcome to Hermeneia",
     content: "Notes, transcription, and knowledge management — all in one fast, private app.",
   },
   {

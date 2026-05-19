@@ -1,19 +1,19 @@
 #![cfg(any(target_os = "windows"))]
 #![allow(unused)]
-use platypus_notes::window_details_collector::windows::v2::screen_reader_flag::get_system_screen_reader_flag;
-use platypus_notes::window_details_collector::windows::v2::screen_reader_flag::toggle_on_screen_reader_property;
-use platypus_notes::window_details_collector::windows::v2::windows_accessibility_engine_v2::observe;
-use platypus_notes::window_details_collector::windows::v2::{
+use hermeneia_notes::window_details_collector::windows::v2::screen_reader_flag::get_system_screen_reader_flag;
+use hermeneia_notes::window_details_collector::windows::v2::screen_reader_flag::toggle_on_screen_reader_property;
+use hermeneia_notes::window_details_collector::windows::v2::windows_accessibility_engine_v2::observe;
+use hermeneia_notes::window_details_collector::windows::v2::{
     catch_event_system_alert::win_hook, uiautomation_print::print_all_elements,
 };
-use platypus_notes::window_details_collector::windows::windows_accessibility_engine::by_pid;
+use hermeneia_notes::window_details_collector::windows::windows_accessibility_engine::by_pid;
 use std::thread;
 use std::thread::sleep;
 use std::time::Duration;
 
 use active_win_pos_rs::get_active_window;
-use platypus_notes::window_details_collector::windows::window_details_collector_windows::get_element_tree_by_process_id;
-// use platypus_notes::permissions::permissions_engine_windows::init_permissions;
+use hermeneia_notes::window_details_collector::windows::window_details_collector_windows::get_element_tree_by_process_id;
+// use hermeneia_notes::permissions::permissions_engine_windows::init_permissions;
 
 
 #[cfg(test)]

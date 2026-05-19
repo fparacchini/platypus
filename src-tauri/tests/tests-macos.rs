@@ -5,8 +5,8 @@ use std::thread;
 use std::thread::sleep;
 use std::time::Duration;
 use active_win_pos_rs::get_active_window;
-use platypus_notes::window_details_collector::macos::macos_accessibility_engine::observe_by_pid;
-use platypus_notes::window_details_collector::macos::window_details_collector_macos::get_element_tree_by_process_id;
+use hermeneia_notes::window_details_collector::macos::macos_accessibility_engine::observe_by_pid;
+use hermeneia_notes::window_details_collector::macos::window_details_collector_macos::get_element_tree_by_process_id;
 
 #[cfg(test)]
 #[test]

@@ -2,7 +2,7 @@ import { type FC } from "react";
 import styled from "styled-components";
 import { IconButton, Flex } from "@chakra-ui/react";
 import { type Project } from "../data/project";
-import { Text } from "@platypus-app/design";
+import { Text } from "@hermeneia-app/design";
 import { FaEdit, FaPlus, FaTrash } from "react-icons/fa";
 
 const Container = styled.div`

@@ -8,8 +8,8 @@
     "withGlobalTauri": false
   },
   "package": {
-    "productName": "Platypus",
-    "version": "0.0.5"
+    "productName": "Hermeneia",
+    "version": "1.0.0"
   },
   "tauri": {
     "macOSPrivateApi": true,
@@ -60,7 +60,7 @@
         "icons/icon.icns",
         "icons/icon.ico"
       ],
-      "identifier": "com.platypusnotes.dev",
+      "identifier": "com.hermeneianotes.dev",
       "longDescription": "",
       "macOS": {
         "entitlements": "macos-entitlements.plist",
@@ -100,7 +100,7 @@
         "fullscreen": false,
         "height": 800,
         "resizable": true,
-        "title": "Platypus",
+        "title": "Hermeneia",
         "width": 1200
       }
     ]

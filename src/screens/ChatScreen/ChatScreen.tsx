@@ -11,7 +11,7 @@ import {
   WrapItem,
   useToast,
 } from "@chakra-ui/react";
-import { Text, NavButton } from "@platypus-app/design";
+import { Text, NavButton } from "@hermeneia-app/design";
 import styled from "styled-components";
 import { invoke } from "@tauri-apps/api/tauri";
 import { listen } from "@tauri-apps/api/event";

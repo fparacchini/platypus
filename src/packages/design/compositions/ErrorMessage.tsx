@@ -1,6 +1,6 @@
 import { type FC } from "react";
 import styled from "styled-components";
-import { TitleError } from "@platypus-app/design";
+import { TitleError } from "@hermeneia-app/design";
 const Container = styled.div`
   display: flex;
   flex: 1;

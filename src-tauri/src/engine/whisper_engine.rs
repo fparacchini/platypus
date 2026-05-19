@@ -57,7 +57,7 @@ fn suppress_whisper_logs() {
 pub fn model_dir() -> PathBuf {
     dirs::data_dir()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join("platypus_notes")
+        .join("hermeneia_notes")
         .join("models")
 }
 

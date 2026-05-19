@@ -26,7 +26,7 @@ const MAX_REDIRECTS: usize = 5;
 // 403s generic Chrome strings to enforce its identification policy) and on
 // most other sites. Some Cloudflare-fronted sites may prefer a real browser
 // string — if that becomes a real complaint, expose this in Settings.
-const USER_AGENT: &str = "PlatypusNotes/0.1 (+https://platypusnotes.com)";
+const USER_AGENT: &str = "HermeneiaNotes/0.1 (+https://hermeneianotes.com)";
 
 #[derive(Serialize, Clone)]
 pub struct IngestedPage {

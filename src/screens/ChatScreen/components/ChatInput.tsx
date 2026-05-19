@@ -196,7 +196,7 @@ export const ChatInput: FC<ChatInputProps> = ({
                 onKeyDown(e);
               }
             }}
-            placeholder="Ask Platypus anything..."
+            placeholder="Ask Hermeneia anything..."
             resize="none"
             rows={1}
             mr={2}

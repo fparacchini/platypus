@@ -159,9 +159,9 @@ export const MeetingPopup = () => {
         >
           ×
         </button>
-        <img src="/platypus-icon.png" alt="Platypus" style={ICON_STYLE} />
+        <img src="/hermeneia-icon.png" alt="Hermeneia" style={ICON_STYLE} />
         <div style={TEXT_WRAP_STYLE}>
-          <div style={TITLE_STYLE}>Platypus</div>
+          <div style={TITLE_STYLE}>Hermeneia</div>
           <div style={SUBTITLE_STYLE}>{subtitle}</div>
         </div>
         <button style={BUTTON_STYLE} onClick={handleStart}>

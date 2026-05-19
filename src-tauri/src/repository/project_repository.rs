@@ -1,5 +1,5 @@
 use crate::entity::project::Project;
-use platypus_notes::html_to_plain_text;
+use hermeneia_notes::html_to_plain_text;
 use rusqlite::{named_params, params, Connection};
 
 pub fn delete_project(conn: &Connection, project_id: i64) -> Result<(), rusqlite::Error> {
@@ -317,7 +317,7 @@ pub fn delete_project_document(
 
 const DEFAULT_PROJECT_ID: i64 = 0;
 
-/// Get all documents across all projects for the "Add content to Platypus" modal
+/// Get all documents across all projects for the "Add content to Hermeneia" modal
 /// Returns: Vec of (document_id, document_name, project_name, created_at)
 pub fn get_all_documents(
     conn: &Connection,

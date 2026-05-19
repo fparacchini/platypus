@@ -1,6 +1,6 @@
 import { FC, ReactNode } from "react";
 import styled from "styled-components";
-import { ConditionalWrapper } from "@platypus-app/components";
+import { ConditionalWrapper } from "@hermeneia-app/components";
 import {
   Popover,
   PopoverTrigger,

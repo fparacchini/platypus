@@ -1,6 +1,6 @@
 import { FC, CSSProperties, PropsWithChildren, ReactNode } from "react";
 import styled, { css } from "styled-components";
-import { Title } from "@platypus-app/design";
+import { Title } from "@hermeneia-app/design";
 
 type CardContainerProps = {
   $height?: CSSProperties["height"];

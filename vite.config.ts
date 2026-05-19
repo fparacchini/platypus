@@ -7,7 +7,7 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
-      "@platypus-app": path.resolve(__dirname, "./src/packages"),
+      "@hermeneia-app": path.resolve(__dirname, "./src/packages"),
     },
   },
   plugins: [

@@ -375,7 +375,7 @@ fn prepare_log_mel(log_mel: &[Vec<f32>], n_mels: usize) -> Vec<f32> {
 pub fn diarization_model_dir() -> PathBuf {
     dirs::data_dir()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join("platypus_notes")
+        .join("hermeneia_notes")
         .join("models")
 }
 

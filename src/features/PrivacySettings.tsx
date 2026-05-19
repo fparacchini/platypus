@@ -2,7 +2,7 @@ import { type FC, useState, useEffect, useMemo } from "react";
 import { Input, Switch, Tooltip } from "@chakra-ui/react";
 import styled from "styled-components";
 import { invoke } from "@tauri-apps/api/tauri";
-import { Title, Text } from "@platypus-app/design";
+import { Title, Text } from "@hermeneia-app/design";
 
 const ContentContainer = styled.div`
   display: flex;
